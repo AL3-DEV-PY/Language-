@@ -29,6 +29,12 @@ data class UserSession(
     val profile: Profile
 )
 
+private fun JSONObject.optNullableString(key: String): String? {
+    if (!has(key) || isNull(key)) return null
+    val value = optString(key)
+    return if (value == "null" || value.isEmpty()) null else value
+}
+
 class LinguaXRepository {
 
     private val httpClient = OkHttpClient.Builder()
@@ -164,7 +170,7 @@ class LinguaXRepository {
 
             if (response.isSuccessful && responseString.isNotBlank()) {
                 val json = JSONObject(responseString)
-                val token = json.optString("access_token", null)
+                val token = json.optNullableString("access_token")
                 val userObj = json.optJSONObject("user") ?: JSONObject()
                 val userId = userObj.optString("id", "usr_new")
                 val userEmail = userObj.optString("email", email)
@@ -211,9 +217,9 @@ class LinguaXRepository {
                     val obj = array.getJSONObject(0)
                     Profile(
                         id = obj.getString("id"),
-                        username = obj.optString("username", null),
+                        username = obj.optNullableString("username"),
                         displayName = obj.optString("display_name", "Learner"),
-                        avatarUrl = obj.optString("avatar_url", null),
+                        avatarUrl = obj.optNullableString("avatar_url"),
                         xp = obj.optInt("xp", 420),
                         coins = obj.optInt("coins", 150),
                         streak = obj.optInt("streak", 7),
@@ -305,10 +311,10 @@ class LinguaXRepository {
                             LanguageItem(
                                 id = obj.getString("id"),
                                 name = obj.getString("name"),
-                                nativeName = obj.optString("native_name", null),
+                                nativeName = obj.optNullableString("native_name"),
                                 code = obj.getString("code"),
                                 flagEmoji = obj.optString("flag_emoji", obj.optString("flag", "🌐")),
-                                iconUrl = obj.optString("icon_url", null),
+                                iconUrl = obj.optNullableString("icon_url"),
                                 description = obj.optString("description", ""),
                                 learnersCount = obj.optInt("learners_count", 1000),
                                 isActive = obj.optBoolean("is_active", true),
@@ -397,7 +403,7 @@ class LinguaXRepository {
                                     title = cObj.getString("title"),
                                     description = cObj.optString("description", ""),
                                     level = cObj.optString("level", "A1 Beginner"),
-                                    imageUrl = cObj.optString("image_url", null),
+                                    imageUrl = cObj.optNullableString("image_url"),
                                     totalLessons = cObj.optInt("total_lessons", 10),
                                     orderIndex = cObj.optInt("order_index", cObj.optInt("sort_order", i + 1)),
                                     units = unitsList
@@ -709,11 +715,11 @@ class LinguaXRepository {
                                 id = id,
                                 word = obj.getString("word"),
                                 translation = obj.getString("translation"),
-                                phonetic = obj.optString("phonetic", null),
+                                phonetic = obj.optNullableString("phonetic"),
                                 partOfSpeech = obj.optString("part_of_speech", "Noun"),
-                                exampleSentence = obj.optString("example_sentence", null),
+                                exampleSentence = obj.optNullableString("example_sentence"),
                                 languageCode = obj.optString("language_code", languageCode),
-                                audioUrl = obj.optString("audio_url", null),
+                                audioUrl = obj.optNullableString("audio_url"),
                                 masteryLevel = obj.optInt("mastery_level", 3),
                                 isBookmarked = bookmarkedVocabIds.contains(id)
                             )
@@ -884,9 +890,9 @@ class LinguaXRepository {
                                 question = obj.getString("question"),
                                 options = opts,
                                 correctAnswer = obj.getString("correct_answer"),
-                                explanation = obj.optString("explanation", null),
-                                audioUrl = obj.optString("audio_url", null),
-                                imageUrl = obj.optString("image_url", null),
+                                explanation = obj.optNullableString("explanation"),
+                                audioUrl = obj.optNullableString("audio_url"),
+                                imageUrl = obj.optNullableString("image_url"),
                                 sortOrder = obj.optInt("sort_order", i + 1)
                             )
                         )

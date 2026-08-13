@@ -24,6 +24,7 @@ import com.example.data.i18n.AppLanguage
 import com.example.data.i18n.L10nStrings
 import com.example.ui.components.LinguaX3DButton
 import com.example.ui.components.LinguaX3DCard
+import com.example.ui.components.LinguaXSphereHero
 import com.example.ui.theme.*
 
 @Composable
@@ -104,82 +105,45 @@ fun LandingScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            // 3D Glowing App Brand Icon
-            Box(
-                modifier = Modifier
-                    .size(90.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(LinguaXPrimaryGradient)
-                    .padding(3.dp),
-                contentAlignment = Alignment.Center
+            // 3D Animated LinguaX Language Sphere Hero Visual
+            LinguaXSphereHero(
+                modifier = Modifier.padding(vertical = 4.dp)
+            )
+
+            // Sleek Modern Typography Hierarchy
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(RoundedCornerShape(22.dp))
-                        .background(LinguaXSurface)
-                        .padding(12.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "LX",
-                        style = MaterialTheme.typography.displayLarge.copy(
-                            fontWeight = FontWeight.Black,
-                            fontSize = 32.sp
-                        ),
-                        color = LinguaXAccent
-                    )
-                }
-            }
+                Text(
+                    text = l10n.appName,
+                    style = MaterialTheme.typography.displayMedium.copy(
+                        fontWeight = FontWeight.Black,
+                        fontSize = 32.sp,
+                        letterSpacing = 1.2.sp
+                    ),
+                    color = LinguaXTextPrimary
+                )
 
-            Text(
-                text = l10n.appName,
-                style = MaterialTheme.typography.displayMedium.copy(
-                    fontWeight = FontWeight.Black,
-                    fontSize = 32.sp
-                ),
-                color = LinguaXTextPrimary
-            )
+                Text(
+                    text = "Learn. Speak. Master.",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp,
+                        letterSpacing = 0.5.sp
+                    ),
+                    color = LinguaXAccentLight,
+                    textAlign = TextAlign.Center
+                )
 
-            Text(
-                text = l10n.welcomeTitle,
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 20.sp
-                ),
-                color = LinguaXAccentLight,
-                textAlign = TextAlign.Center
-            )
-
-            Text(
-                text = l10n.welcomeSubtitle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = LinguaXTextSecondary,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(horizontal = 10.dp)
-            )
-
-            // Supported Languages Flag Pill Ribbon
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = Color(0xFF131C2E),
-                border = androidx.compose.foundation.BorderStroke(1.dp, LinguaXBorder)
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("🇸🇦", fontSize = 18.sp)
-                    Text("🇺🇸", fontSize = 18.sp)
-                    Text("🇫🇷", fontSize = 18.sp)
-                    Text("🇪🇸", fontSize = 18.sp)
-                    Text("🇩🇪", fontSize = 18.sp)
-                    Text("🇮🇹", fontSize = 18.sp)
-                    Text("🇹🇷", fontSize = 18.sp)
-                    Text("🇯🇵", fontSize = 18.sp)
-                    Text("🇰🇷", fontSize = 18.sp)
-                }
+                Text(
+                    text = "One platform. Every language.",
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontSize = 13.sp
+                    ),
+                    color = LinguaXTextSecondary,
+                    textAlign = TextAlign.Center
+                )
             }
         }
 
