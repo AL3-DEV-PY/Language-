@@ -1,253 +1,220 @@
 package com.example.ui.screens.auth
 
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.R
+import com.example.data.i18n.AppLanguage
 import com.example.data.i18n.L10nStrings
+import com.example.ui.components.LinguaX3DButton
+import com.example.ui.components.LinguaX3DCard
 import com.example.ui.theme.*
 
 @Composable
 fun LandingScreen(
     l10n: L10nStrings,
+    currentAppLanguage: AppLanguage,
+    onLanguageChange: (AppLanguage) -> Unit,
     onNavigateToLogin: () -> Unit,
     onNavigateToSignup: () -> Unit,
+    onContinueAsGuest: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val scrollState = rememberScrollState()
+    var showLanguageMenu by remember { mutableStateOf(false) }
 
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        LinguaXPrimaryContainer,
-                        LinguaXBackground,
-                        Color.White
-                    )
-                )
-            )
+            .background(LinguaXBackground)
+            .padding(20.dp)
+            .systemBarsPadding()
     ) {
-        Column(
+        // Top Bar: Language Selector
+        Row(
             modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(scrollState)
-                .padding(24.dp)
-                .systemBarsPadding(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween
+                .fillMaxWidth()
+                .align(Alignment.TopEnd),
+            horizontalArrangement = Arrangement.End
         ) {
-            // Header Logo
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.padding(top = 16.dp)
-            ) {
+            Box {
                 Surface(
-                    shape = CircleShape,
-                    color = LinguaXPrimary,
-                    modifier = Modifier.size(44.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Image(
-                            painter = painterResource(id = R.drawable.img_app_icon),
-                            contentDescription = "LinguaX Logo",
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
-                }
-                Text(
-                    text = l10n.appName,
-                    style = MaterialTheme.typography.headlineMedium.copy(
-                        fontWeight = FontWeight.Black,
-                        fontSize = 28.sp,
-                        letterSpacing = (-0.5).sp
-                    ),
-                    color = LinguaXPrimary
-                )
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // App Graphic / Hero Banner Card
-            Card(
-                shape = RoundedCornerShape(28.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(180.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(
-                                Brush.linearGradient(
-                                    colors = listOf(LinguaXPrimary, LinguaXSecondary)
-                                )
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = "🇺🇸 🇫🇷 🇸🇦",
-                                fontSize = 36.sp
-                            )
-                            Text(
-                                text = "Interactive Multi-Language Platform",
-                                color = Color.White,
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.padding(horizontal = 16.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    Text(
-                        text = l10n.welcomeTitle,
-                        style = MaterialTheme.typography.headlineSmall.copy(
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 22.sp,
-                            lineHeight = 28.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onSurface,
-                        textAlign = TextAlign.Center
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Text(
-                        text = l10n.welcomeSubtitle,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            lineHeight = 20.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // Feature highlights
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        FeatureCheckItem("Structured courses for English, French & Arabic")
-                        FeatureCheckItem("Daily streak, XP rewards & coin milestones")
-                        FeatureCheckItem("Vocabulary cards with audio & full RTL support")
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            // Action Buttons
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Button(
-                    onClick = onNavigateToSignup,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp)
-                        .testTag("landing_get_started_button"),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = LinguaXPrimary)
+                    onClick = { showLanguageMenu = true },
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color(0xFF162238),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, LinguaXBorderLight)
                 ) {
                     Row(
-                        horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
+                        Text(text = currentAppLanguage.flag, fontSize = 16.sp)
                         Text(
-                            text = l10n.getStarted,
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold
-                            )
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                            contentDescription = null
+                            text = currentAppLanguage.displayName,
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = LinguaXTextPrimary
                         )
                     }
                 }
 
-                OutlinedButton(
-                    onClick = onNavigateToLogin,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp)
-                        .testTag("landing_sign_in_button"),
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.5.dp, Brush.horizontalGradient(listOf(LinguaXPrimary, LinguaXSecondary)))
+                DropdownMenu(
+                    expanded = showLanguageMenu,
+                    onDismissRequest = { showLanguageMenu = false },
+                    modifier = Modifier.background(LinguaXSurfaceElevated)
                 ) {
-                    Text(
-                        text = l10n.signIn,
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = LinguaXPrimary
+                    AppLanguage.values().forEach { lang ->
+                        DropdownMenuItem(
+                            text = {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(text = lang.flag)
+                                    Text(text = "${lang.displayName} (${lang.nativeName})", color = LinguaXTextPrimary)
+                                }
+                            },
+                            onClick = {
+                                onLanguageChange(lang)
+                                showLanguageMenu = false
+                            }
                         )
-                    )
+                    }
                 }
             }
         }
-    }
-}
 
-@Composable
-private fun FeatureCheckItem(text: String) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Icon(
-            imageVector = Icons.Default.CheckCircle,
-            contentDescription = null,
-            tint = LinguaXSuccessGreen,
-            modifier = Modifier.size(18.dp)
-        )
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface
-        )
+        // Center Content
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.Center),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(20.dp)
+        ) {
+            // 3D Glowing App Brand Icon
+            Box(
+                modifier = Modifier
+                    .size(90.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(LinguaXPrimaryGradient)
+                    .padding(3.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(LinguaXSurface)
+                        .padding(12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "LX",
+                        style = MaterialTheme.typography.displayLarge.copy(
+                            fontWeight = FontWeight.Black,
+                            fontSize = 32.sp
+                        ),
+                        color = LinguaXAccent
+                    )
+                }
+            }
+
+            Text(
+                text = l10n.appName,
+                style = MaterialTheme.typography.displayMedium.copy(
+                    fontWeight = FontWeight.Black,
+                    fontSize = 32.sp
+                ),
+                color = LinguaXTextPrimary
+            )
+
+            Text(
+                text = l10n.welcomeTitle,
+                style = MaterialTheme.typography.titleLarge.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp
+                ),
+                color = LinguaXAccentLight,
+                textAlign = TextAlign.Center
+            )
+
+            Text(
+                text = l10n.welcomeSubtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = LinguaXTextSecondary,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 10.dp)
+            )
+
+            // Supported Languages Flag Pill Ribbon
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = Color(0xFF131C2E),
+                border = androidx.compose.foundation.BorderStroke(1.dp, LinguaXBorder)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("🇸🇦", fontSize = 18.sp)
+                    Text("🇺🇸", fontSize = 18.sp)
+                    Text("🇫🇷", fontSize = 18.sp)
+                    Text("🇪🇸", fontSize = 18.sp)
+                    Text("🇩🇪", fontSize = 18.sp)
+                    Text("🇮🇹", fontSize = 18.sp)
+                    Text("🇹🇷", fontSize = 18.sp)
+                    Text("🇯🇵", fontSize = 18.sp)
+                    Text("🇰🇷", fontSize = 18.sp)
+                }
+            }
+        }
+
+        // Bottom Actions
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomCenter),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            LinguaX3DButton(
+                text = l10n.getStarted,
+                icon = Icons.AutoMirrored.Filled.ArrowForward,
+                onClick = onNavigateToSignup,
+                testTag = "landing_signup_button"
+            )
+
+            LinguaX3DButton(
+                text = l10n.signIn,
+                gradient = Brush.linearGradient(listOf(Color(0xFF1E2D4A), Color(0xFF162136))),
+                textColor = LinguaXTextPrimary,
+                onClick = onNavigateToLogin,
+                testTag = "landing_login_button"
+            )
+
+            TextButton(
+                onClick = onContinueAsGuest,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "Explore as Guest",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = LinguaXTextTertiary
+                )
+            }
+        }
     }
 }

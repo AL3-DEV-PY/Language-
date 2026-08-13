@@ -1,13 +1,15 @@
 package com.example.ui.screens.vocabulary
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -20,21 +22,24 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.i18n.L10nStrings
+import com.example.data.model.LanguageItem
 import com.example.data.model.VocabularyItem
 import com.example.data.repository.Resource
+import com.example.ui.components.LinguaX3DCard
 import com.example.ui.components.LinguaXHeader
 import com.example.ui.components.ResourceContainer
 import com.example.ui.theme.*
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VocabularyScreen(
     l10n: L10nStrings,
+    selectedTargetLanguage: LanguageItem,
     vocabularyResource: Resource<List<VocabularyItem>>,
+    onToggleBookmark: (VocabularyItem) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var searchQuery by remember { mutableStateOf("") }
-    var filterSavedOnly by remember { mutableStateOf(false) }
+    var filterBookmarkedOnly by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -42,88 +47,110 @@ fun VocabularyScreen(
             .background(LinguaXBackground)
             .padding(16.dp)
             .systemBarsPadding(),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         LinguaXHeader(
             title = l10n.vocabularyTab,
-            subtitle = "Master essential words & expressions"
+            subtitle = "${selectedTargetLanguage.flagEmoji} ${selectedTargetLanguage.name} • Flashcards & Pronunciation"
         )
 
-        // Search Bar
+        // 3D Search Field
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
-            placeholder = { Text(l10n.searchVocabulary) },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
+            placeholder = {
+                Text(
+                    text = l10n.searchVocabulary,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = LinguaXTextTertiary
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = "Search",
+                    tint = LinguaXAccent
+                )
+            },
             trailingIcon = {
                 if (searchQuery.isNotEmpty()) {
                     IconButton(onClick = { searchQuery = "" }) {
-                        Icon(Icons.Default.Clear, contentDescription = "Clear")
+                        Icon(
+                            imageVector = Icons.Default.Clear,
+                            contentDescription = "Clear",
+                            tint = LinguaXTextSecondary
+                        )
                     }
                 }
             },
             singleLine = true,
             shape = RoundedCornerShape(16.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = LinguaXSurfaceElevated,
+                unfocusedContainerColor = LinguaXSurface,
+                focusedBorderColor = LinguaXAccent,
+                unfocusedBorderColor = LinguaXBorder,
+                focusedTextColor = LinguaXTextPrimary,
+                unfocusedTextColor = LinguaXTextPrimary
+            ),
             modifier = Modifier
                 .fillMaxWidth()
-                .testTag("vocabulary_search_input")
+                .testTag("vocabulary_search_field")
         )
 
-        // Filter Chips
+        // Filter Chips Row
         Row(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
             FilterChip(
-                selected = !filterSavedOnly,
-                onClick = { filterSavedOnly = false },
+                selected = !filterBookmarkedOnly,
+                onClick = { filterBookmarkedOnly = false },
                 label = { Text(l10n.filterAll) },
                 colors = FilterChipDefaults.filterChipColors(
                     selectedContainerColor = LinguaXPrimary,
-                    selectedLabelColor = Color.White
+                    selectedLabelColor = Color.White,
+                    containerColor = LinguaXSurfaceElevated,
+                    labelColor = LinguaXTextSecondary
                 ),
-                shape = RoundedCornerShape(20.dp)
+                shape = RoundedCornerShape(12.dp)
             )
 
             FilterChip(
-                selected = filterSavedOnly,
-                onClick = { filterSavedOnly = true },
-                label = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(Icons.Default.Bookmark, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Text(l10n.filterBookmarked)
-                    }
+                selected = filterBookmarkedOnly,
+                onClick = { filterBookmarkedOnly = true },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Bookmark,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
                 },
+                label = { Text(l10n.filterBookmarked) },
                 colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = LinguaXPrimary,
-                    selectedLabelColor = Color.White
+                    selectedContainerColor = LinguaXWarning,
+                    selectedLabelColor = Color.Black,
+                    containerColor = LinguaXSurfaceElevated,
+                    labelColor = LinguaXTextSecondary
                 ),
-                shape = RoundedCornerShape(20.dp)
+                shape = RoundedCornerShape(12.dp)
             )
         }
 
-        // Vocabulary List
+        // Vocabulary Flashcards List
         ResourceContainer(
             resource = vocabularyResource,
             loadingText = l10n.loading,
             emptyText = l10n.noDataAvailable
-        ) { rawList ->
-            var vocabList by remember(rawList) { mutableStateOf(rawList) }
-
-            val filteredList = remember(vocabList, searchQuery, filterSavedOnly) {
-                vocabList.filter { item ->
-                    val matchesQuery = searchQuery.isBlank() ||
-                            item.word.contains(searchQuery, ignoreCase = true) ||
-                            item.translation.contains(searchQuery, ignoreCase = true)
-                    val matchesBookmark = !filterSavedOnly || item.isBookmarked
-                    matchesQuery && matchesBookmark
-                }
+        ) { vocabList ->
+            val filtered = vocabList.filter { item ->
+                val matchesQuery = item.word.contains(searchQuery, ignoreCase = true) ||
+                        item.translation.contains(searchQuery, ignoreCase = true)
+                val matchesBookmark = if (filterBookmarkedOnly) item.isBookmarked else true
+                matchesQuery && matchesBookmark
             }
 
-            if (filteredList.isEmpty()) {
+            if (filtered.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -131,9 +158,9 @@ fun VocabularyScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = l10n.noDataAvailable,
+                        text = "No vocabulary items found.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = LinguaXTextTertiary
                     )
                 }
             } else {
@@ -141,14 +168,10 @@ fun VocabularyScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    items(filteredList) { item ->
-                        VocabularyCard(
-                            item = item,
-                            onToggleBookmark = {
-                                vocabList = vocabList.map {
-                                    if (it.id == item.id) it.copy(isBookmarked = !it.isBookmarked) else it
-                                }
-                            }
+                    items(filtered) { vocab ->
+                        VocabularyCardItem(
+                            item = vocab,
+                            onToggleBookmark = { onToggleBookmark(vocab) }
                         )
                     }
                 }
@@ -158,20 +181,20 @@ fun VocabularyScreen(
 }
 
 @Composable
-private fun VocabularyCard(
+fun VocabularyCardItem(
     item: VocabularyItem,
     onToggleBookmark: () -> Unit
 ) {
-    Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        modifier = Modifier.fillMaxWidth()
+    var isAudioPlaying by remember { mutableStateOf(false) }
+
+    LinguaX3DCard(
+        modifier = Modifier.fillMaxWidth(),
+        backgroundColor = Color(0xFF131C2E),
+        borderBrush = LinguaXBorderGradient,
+        elevation = 4.dp
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Header Row with Word, Part of Speech pill & Bookmark Button
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -179,75 +202,93 @@ private fun VocabularyCard(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
                         text = item.word,
                         style = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = LinguaXPrimary
-                        )
+                            fontWeight = FontWeight.Black,
+                            fontSize = 20.sp
+                        ),
+                        color = LinguaXTextPrimary
                     )
-                    if (!item.phonetic.isNullOrBlank()) {
+
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = LinguaXSecondaryContainer
+                    ) {
                         Text(
-                            text = item.phonetic,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            text = item.partOfSpeech,
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                            color = LinguaXSecondaryLight,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         )
                     }
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { /* Play audio pronunciation */ }) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    // Audio pronunciation button
+                    IconButton(
+                        onClick = { isAudioPlaying = !isAudioPlaying },
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(if (isAudioPlaying) LinguaXAccent else Color(0xFF1C2840))
+                    ) {
                         Icon(
-                            imageVector = Icons.Default.VolumeUp,
-                            contentDescription = "Listen",
-                            tint = LinguaXPrimary
+                            imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                            contentDescription = "Pronounce",
+                            tint = if (isAudioPlaying) Color.Black else LinguaXAccent,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
-                    IconButton(onClick = onToggleBookmark) {
+
+                    // Bookmark toggle
+                    IconButton(
+                        onClick = onToggleBookmark,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(if (item.isBookmarked) LinguaXWarning.copy(alpha = 0.2f) else Color(0xFF1C2840))
+                    ) {
                         Icon(
                             imageVector = if (item.isBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
                             contentDescription = "Bookmark",
-                            tint = if (item.isBookmarked) LinguaXAccentGold else MaterialTheme.colorScheme.onSurfaceVariant
+                            tint = if (item.isBookmarked) LinguaXWarning else LinguaXTextSecondary,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
             }
 
-            Surface(
-                shape = CircleShape,
-                color = LinguaXSecondaryContainer
-            ) {
+            if (!item.phonetic.isNullOrBlank()) {
                 Text(
-                    text = item.partOfSpeech,
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        color = LinguaXOnSecondaryContainer,
-                        fontWeight = FontWeight.SemiBold
-                    ),
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp)
+                    text = item.phonetic,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LinguaXAccentLight
                 )
             }
 
             Text(
                 text = item.translation,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 16.sp
-                ),
-                color = MaterialTheme.colorScheme.onSurface
+                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                color = LinguaXTextSecondary
             )
 
             if (!item.exampleSentence.isNullOrBlank()) {
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = LinguaXBackground,
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color(0xFF0F1826),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1E2B42)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "💬 \"${item.exampleSentence}\"",
+                        text = "\"${item.exampleSentence}\"",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = LinguaXTextTertiary,
                         modifier = Modifier.padding(10.dp)
                     )
                 }

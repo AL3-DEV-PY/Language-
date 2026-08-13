@@ -25,7 +25,7 @@ class MainViewModel(
     private val repository: LinguaXRepository = LinguaXRepository()
 ) : ViewModel() {
 
-    // App Interface Language (EN, FR, AR)
+    // App Interface Language (Arabic, English, French, Spanish, German, Italian, Turkish, Japanese, Korean)
     private val _appLanguage = MutableStateFlow(AppLanguage.ENGLISH)
     val appLanguage: StateFlow<AppLanguage> = _appLanguage.asStateFlow()
 
@@ -58,7 +58,7 @@ class MainViewModel(
     private val _achievementsState = MutableStateFlow<Resource<List<AchievementItem>>>(Resource.Loading)
     val achievementsState: StateFlow<Resource<List<AchievementItem>>> = _achievementsState.asStateFlow()
 
-    // Selected Lesson Exercises State
+    // Selected Lesson Exercises State for Interactive Player
     private val _activeExercisesState = MutableStateFlow<Resource<List<Exercise>>>(Resource.Empty)
     val activeExercisesState: StateFlow<Resource<List<Exercise>>> = _activeExercisesState.asStateFlow()
 
@@ -114,6 +114,10 @@ class MainViewModel(
         }
     }
 
+    fun continueAsGuest() {
+        login("learner@linguax.com", "demo123456")
+    }
+
     fun logout() {
         repository.logout()
         _authState.value = AuthState.Unauthenticated
@@ -165,6 +169,24 @@ class MainViewModel(
     fun dismissLessonPreview() {
         _selectedLessonForDialog.value = null
         _activeExercisesState.value = Resource.Empty
+    }
+
+    fun completeLesson(lesson: Lesson) {
+        viewModelScope.launch {
+            val xp = lesson.xpReward
+            val coins = 10
+            repository.recordLessonCompleted(lesson.id, xp, coins)
+            // Reload courses and profile to reflect updated status
+            loadCourses(selectedTargetLanguage.value.code)
+            loadChallenges()
+            loadAchievements()
+            dismissLessonPreview()
+        }
+    }
+
+    fun toggleVocabularyBookmark(vocab: VocabularyItem) {
+        repository.toggleVocabularyBookmark(vocab.id)
+        loadVocabulary(selectedTargetLanguage.value.code)
     }
 
     fun updateProfile(newDisplayName: String, newGoal: Int) {

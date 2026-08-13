@@ -21,11 +21,14 @@ data class Profile(
 data class LanguageItem(
     @Json(name = "id") val id: String,
     @Json(name = "name") val name: String,
+    @Json(name = "native_name") val nativeName: String? = null,
     @Json(name = "code") val code: String,
-    @Json(name = "flag_emoji") val flagEmoji: String,
+    @Json(name = "flag_emoji") val flagEmoji: String = "🌐",
     @Json(name = "icon_url") val iconUrl: String? = null,
     @Json(name = "description") val description: String? = null,
-    @Json(name = "learners_count") val learnersCount: Int = 1000
+    @Json(name = "learners_count") val learnersCount: Int = 1000,
+    @Json(name = "is_active") val isActive: Boolean = true,
+    @Json(name = "sort_order") val sortOrder: Int = 1
 )
 
 @JsonClass(generateAdapter = true)
@@ -35,8 +38,11 @@ data class Course(
     @Json(name = "title") val title: String,
     @Json(name = "description") val description: String,
     @Json(name = "level") val level: String = "A1 Beginner",
+    @Json(name = "image_url") val imageUrl: String? = null,
     @Json(name = "total_lessons") val totalLessons: Int = 12,
     @Json(name = "order_index") val orderIndex: Int = 1,
+    @Json(name = "is_active") val isActive: Boolean = true,
+    @Json(name = "sort_order") val sortOrder: Int = 1,
     val units: List<UnitItem> = emptyList()
 )
 
@@ -47,6 +53,7 @@ data class UnitItem(
     @Json(name = "title") val title: String,
     @Json(name = "description") val description: String,
     @Json(name = "order_index") val orderIndex: Int = 1,
+    @Json(name = "sort_order") val sortOrder: Int = 1,
     val lessons: List<Lesson> = emptyList()
 )
 
@@ -65,6 +72,8 @@ data class Lesson(
     @Json(name = "xp_reward") val xpReward: Int = 15,
     @Json(name = "duration_mins") val durationMins: Int = 5,
     @Json(name = "order_index") val orderIndex: Int = 1,
+    @Json(name = "is_free") val isFree: Boolean = true,
+    @Json(name = "is_active") val isActive: Boolean = true,
     val status: LessonStatus = LessonStatus.LOCKED,
     val exercisesCount: Int = 5
 )
@@ -73,7 +82,9 @@ enum class ExerciseType {
     MULTIPLE_CHOICE,
     VOCABULARY,
     LISTENING,
-    TRANSLATION
+    TRANSLATION,
+    PRONUNCIATION,
+    FILL_IN_BLANK
 }
 
 @JsonClass(generateAdapter = true)
@@ -85,7 +96,9 @@ data class Exercise(
     @Json(name = "options") val options: List<String> = emptyList(),
     @Json(name = "correct_answer") val correctAnswer: String,
     @Json(name = "explanation") val explanation: String? = null,
-    val audioUrl: String? = null
+    @Json(name = "audio_url") val audioUrl: String? = null,
+    @Json(name = "image_url") val imageUrl: String? = null,
+    @Json(name = "sort_order") val sortOrder: Int = 1
 )
 
 @JsonClass(generateAdapter = true)
@@ -97,7 +110,8 @@ data class VocabularyItem(
     @Json(name = "part_of_speech") val partOfSpeech: String = "Noun",
     @Json(name = "example_sentence") val exampleSentence: String? = null,
     @Json(name = "language_code") val languageCode: String = "en",
-    val masteryLevel: Int = 2, // 1 to 5
+    @Json(name = "audio_url") val audioUrl: String? = null,
+    val masteryLevel: Int = 3, // 1 to 5
     val isBookmarked: Boolean = false
 )
 
@@ -106,10 +120,11 @@ data class DailyChallenge(
     @Json(name = "id") val id: String,
     @Json(name = "title") val title: String,
     @Json(name = "description") val description: String,
-    @Json(name = "reward_xp") val rewardXp: Int = 20,
+    @Json(name = "reward_xp") val rewardXp: Int = 25,
     @Json(name = "reward_coins") val rewardCoins: Int = 10,
+    @Json(name = "target") val target: Int = 3,
+    @Json(name = "is_active") val isActive: Boolean = true,
     val currentProgress: Int = 1,
-    val target: Int = 3,
     val isCompleted: Boolean = false
 )
 
@@ -120,18 +135,18 @@ data class AchievementItem(
     @Json(name = "description") val description: String,
     @Json(name = "icon") val iconName: String = "star",
     @Json(name = "category") val category: String = "Streak",
+    @Json(name = "max_progress") val maxProgress: Int = 5,
     val isUnlocked: Boolean = true,
     val unlockedAt: String? = "2026-08-10",
-    val progress: Int = 5,
-    val maxProgress: Int = 5
+    val progress: Int = 5
 )
 
 @JsonClass(generateAdapter = true)
-data class LeaderboardEntry(
+data class UserProgress(
     @Json(name = "user_id") val userId: String,
-    @Json(name = "username") val username: String,
-    @Json(name = "display_name") val displayName: String,
-    @Json(name = "avatar_url") val avatarUrl: String? = null,
-    @Json(name = "xp") val xp: Int,
-    @Json(name = "rank") val rank: Int
+    @Json(name = "lesson_id") val lessonId: String,
+    @Json(name = "completed") val completed: Boolean = false,
+    @Json(name = "progress") val progress: Int = 0,
+    @Json(name = "xp_earned") val xpEarned: Int = 0,
+    @Json(name = "updated_at") val updatedAt: String? = null
 )

@@ -7,7 +7,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.MonetizationOn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,14 +24,14 @@ import androidx.compose.ui.unit.sp
 import com.example.data.i18n.L10nStrings
 import com.example.data.model.DailyChallenge
 import com.example.data.repository.Resource
-import com.example.ui.components.LinguaXHeader
-import com.example.ui.components.ResourceContainer
+import com.example.ui.components.*
 import com.example.ui.theme.*
 
 @Composable
 fun ChallengesScreen(
     l10n: L10nStrings,
     challengesResource: Resource<List<DailyChallenge>>,
+    onClaimReward: (DailyChallenge) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -41,71 +44,23 @@ fun ChallengesScreen(
     ) {
         LinguaXHeader(
             title = l10n.challengesTab,
-            subtitle = l10n.activeChallenges
+            subtitle = "Complete daily quests to accelerate your fluency & earn rewards"
         )
 
-        // Time Remaining Card
-        Card(
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = LinguaXPrimaryContainer),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier.padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Surface(
-                    shape = CircleShape,
-                    color = LinguaXPrimary,
-                    modifier = Modifier.size(42.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.Timer,
-                            contentDescription = null,
-                            tint = Color.White
-                        )
-                    }
-                }
-                Column {
-                    Text(
-                        text = "Daily Reset in 14h 22m",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = LinguaXOnPrimaryContainer
-                        )
-                    )
-                    Text(
-                        text = "Complete challenges to earn bonus XP & Coins",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = LinguaXOnPrimaryContainer.copy(alpha = 0.8f)
-                    )
-                }
-            }
-        }
-
-        // Challenges List
         ResourceContainer(
             resource = challengesResource,
             loadingText = l10n.loading,
             emptyText = l10n.noDataAvailable
-        ) { initialList ->
-            var challengesList by remember(initialList) { mutableStateOf(initialList) }
-
+        ) { challenges ->
             LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(challengesList) { challenge ->
-                    ChallengeCard(
+                items(challenges) { challenge ->
+                    ChallengeCardItem(
                         challenge = challenge,
                         l10n = l10n,
-                        onClaim = {
-                            challengesList = challengesList.map {
-                                if (it.id == challenge.id) it.copy(isCompleted = true, currentProgress = it.target) else it
-                            }
-                        }
+                        onClaimReward = { onClaimReward(challenge) }
                     )
                 }
             }
@@ -114,23 +69,22 @@ fun ChallengesScreen(
 }
 
 @Composable
-private fun ChallengeCard(
+fun ChallengeCardItem(
     challenge: DailyChallenge,
     l10n: L10nStrings,
-    onClaim: () -> Unit
+    onClaimReward: () -> Unit
 ) {
-    val isComplete = challenge.isCompleted || challenge.currentProgress >= challenge.target
+    var isClaimed by remember { mutableStateOf(challenge.isCompleted) }
+    val progress = (challenge.currentProgress.toFloat() / challenge.target.toFloat()).coerceIn(0f, 1f)
+    val canClaim = progress >= 1f && !isClaimed
 
-    Card(
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        modifier = Modifier.fillMaxWidth()
+    LinguaX3DCard(
+        modifier = Modifier.fillMaxWidth(),
+        backgroundColor = Color(0xFF131C2E),
+        borderBrush = if (canClaim) LinguaXBorderGradient else androidx.compose.ui.graphics.SolidColor(LinguaXBorder),
+        elevation = if (canClaim) 6.dp else 3.dp
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -138,90 +92,109 @@ private fun ChallengeCard(
             ) {
                 Text(
                     text = challenge.title,
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    ),
+                    color = LinguaXTextPrimary
                 )
 
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Surface(
-                        shape = CircleShape,
-                        color = Color(0xFFECFEFF)
+                        shape = RoundedCornerShape(8.dp),
+                        color = LinguaXPrimaryContainer
                     ) {
-                        Text(
-                            text = "+${challenge.rewardXp} XP",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = LinguaXAccentCyan
-                            ),
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Bolt, contentDescription = null, tint = LinguaXAccent, modifier = Modifier.size(14.dp))
+                            Text(
+                                text = "+${challenge.rewardXp} XP",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = LinguaXAccent
+                            )
+                        }
                     }
+
                     Surface(
-                        shape = CircleShape,
-                        color = Color(0xFFFFFBEB)
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFF261D12)
                     ) {
-                        Text(
-                            text = "+${challenge.rewardCoins} Coins",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = LinguaXAccentGold
-                            ),
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.MonetizationOn, contentDescription = null, tint = LinguaXWarning, modifier = Modifier.size(14.dp))
+                            Text(
+                                text = "+${challenge.rewardCoins}",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = LinguaXWarning
+                            )
+                        }
                     }
                 }
             }
 
             Text(
                 text = challenge.description,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                style = MaterialTheme.typography.bodySmall,
+                color = LinguaXTextSecondary
             )
 
-            // Progress Bar
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "Progress",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = "${challenge.currentProgress} / ${challenge.target}",
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-
-                LinearProgressIndicator(
-                    progress = { challenge.currentProgress.toFloat() / challenge.target.toFloat().coerceAtLeast(1f) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp)
-                        .clip(RoundedCornerShape(4.dp)),
-                    color = if (isComplete) LinguaXSuccessGreen else LinguaXPrimary,
-                    trackColor = LinguaXPrimaryContainer
+            // Progress bar
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${challenge.currentProgress} / ${challenge.target}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = LinguaXTextSecondary
+                )
+                Text(
+                    text = "${(progress * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                    color = if (progress >= 1f) LinguaXSuccess else LinguaXAccent
                 )
             }
 
-            if (isComplete) {
-                Button(
-                    onClick = onClaim,
-                    colors = ButtonDefaults.buttonColors(containerColor = LinguaXSuccessGreen),
-                    shape = RoundedCornerShape(12.dp),
+            LinguaXProgressBar(
+                progress = progress,
+                fillBrush = if (progress >= 1f) LinguaXGreenGradient else LinguaXAccentGradient,
+                height = 8.dp
+            )
+
+            if (canClaim) {
+                LinguaX3DButton(
+                    text = l10n.claimReward,
+                    icon = Icons.Default.EmojiEvents,
+                    gradient = LinguaXGreenGradient,
+                    onClick = {
+                        isClaimed = true
+                        onClaimReward()
+                    },
+                    height = 44.dp,
+                    testTag = "claim_reward_${challenge.id}"
+                )
+            } else if (isClaimed) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = LinguaXSuccess.copy(alpha = 0.15f),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
+                        modifier = Modifier.padding(8.dp),
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Check, contentDescription = null, tint = LinguaXSuccess, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (challenge.isCompleted) "Reward Claimed ✓" else l10n.claimReward,
-                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                            text = l10n.claimedReward,
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = LinguaXSuccess
                         )
                     }
                 }
