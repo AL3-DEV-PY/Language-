@@ -29,6 +29,16 @@ jobs:
         with:
           gradle-version: "9.3.1"
 
+      - name: Create Supabase environment file
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          cat > .env <<EOF
+          SUPABASE_URL=${SUPABASE_URL}
+          SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+          EOF
+
       - name: Create debug keystore
         run: |
           keytool -genkeypair \
@@ -42,20 +52,12 @@ jobs:
             -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
 
-      - name: Verify debug keystore
-        run: |
-          ls -lh debug.keystore
-          keytool -list \
-            -keystore debug.keystore \
-            -storepass android
-
       - name: Build Debug APK
         run: |
           gradle :app:assembleDebug --stacktrace
 
       - name: Find APK
         run: |
-          echo "APK files:"
           find app/build/outputs -type f -name "*.apk" -print
 
       - name: Upload APK
