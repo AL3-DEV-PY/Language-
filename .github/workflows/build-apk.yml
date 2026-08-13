@@ -1,32 +1,62 @@
-name: Build Android APK
+name: Build LinguaX APK
 
 on:
   push:
-    branches: ["main"]
+    branches:
+      - main
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
-    name: Build APK
+    name: Build Debug APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Gradle
+      - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "9.3.1"
 
+      - name: Create debug keystore
+        run: |
+          keytool -genkeypair \
+            -v \
+            -keystore debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Verify debug keystore
+        run: |
+          ls -lh debug.keystore
+          keytool -list \
+            -keystore debug.keystore \
+            -storepass android
+
       - name: Build Debug APK
-        run: gradle assembleDebug
+        run: |
+          gradle :app:assembleDebug --stacktrace
+
+      - name: Find APK
+        run: |
+          echo "APK files:"
+          find app/build/outputs -type f -name "*.apk" -print
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
