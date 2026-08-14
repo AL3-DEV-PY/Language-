@@ -2,6 +2,8 @@ package com.example.ui.screens.courses
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -13,12 +15,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -28,9 +32,9 @@ import androidx.compose.ui.unit.sp
 import com.example.data.i18n.L10nStrings
 import com.example.data.model.*
 import com.example.data.repository.Resource
-import com.example.ui.components.LinguaX3DButton
 import com.example.ui.components.LinguaX3DCard
 import com.example.ui.components.LinguaXHeader
+import com.example.ui.components.LinguaXProgressBar
 import com.example.ui.components.ResourceContainer
 import com.example.ui.theme.*
 
@@ -44,6 +48,8 @@ fun CoursesScreen(
     onLessonClicked: (Lesson) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var selectedLevelFilter by remember { mutableStateOf("ALL") }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -57,7 +63,7 @@ fun CoursesScreen(
             subtitle = "${selectedTargetLanguage.flagEmoji} ${selectedTargetLanguage.name} • ${l10n.allCourses}"
         )
 
-        // 3D Horizontal Carousel for All Target Languages
+        // 3D Horizontal Language Switcher
         ResourceContainer(
             resource = languagesResource,
             loadingText = l10n.loading,
@@ -107,22 +113,101 @@ fun CoursesScreen(
             }
         }
 
-        // Dynamic Course Hierarchy (Course -> Units -> Lessons)
+        // Level Filter Chips
+        val filterOptions = listOf(
+            "ALL" to "All Levels",
+            "BEGINNER" to "Beginner (A1-A2)",
+            "INTERMEDIATE" to "Intermediate (B1-B2)",
+            "ADVANCED" to "Advanced (C1-C2)"
+        )
+
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            items(filterOptions) { (key, label) ->
+                val isSelected = selectedLevelFilter == key
+                FilterChip(
+                    selected = isSelected,
+                    onClick = { selectedLevelFilter = key },
+                    label = {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                            )
+                        )
+                    },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = LinguaXPrimaryContainer,
+                        selectedLabelColor = LinguaXAccentLight,
+                        containerColor = Color(0xFF131D2F),
+                        labelColor = LinguaXTextSecondary
+                    ),
+                    border = FilterChipDefaults.filterChipBorder(
+                        enabled = true,
+                        selected = isSelected,
+                        borderColor = if (isSelected) LinguaXAccent else Color(0xFF202C42)
+                    ),
+                    modifier = Modifier.testTag("filter_chip_$key")
+                )
+            }
+        }
+
+        // Dynamic Course Hierarchy (Courses -> Units -> Lessons)
         ResourceContainer(
             resource = coursesResource,
             loadingText = l10n.loading,
             emptyText = l10n.noDataAvailable
         ) { courses ->
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(18.dp),
-                modifier = Modifier.fillMaxSize()
-            ) {
-                items(courses) { course ->
-                    CourseCardView(
-                        course = course,
-                        l10n = l10n,
-                        onLessonClicked = onLessonClicked
-                    )
+            val filteredCourses = remember(courses, selectedLevelFilter) {
+                if (selectedLevelFilter == "ALL") courses
+                else courses.filter {
+                    when (selectedLevelFilter) {
+                        "BEGINNER" -> it.level.contains("A1", ignoreCase = true) || it.level.contains("A2", ignoreCase = true) || it.level.contains("Beginner", ignoreCase = true)
+                        "INTERMEDIATE" -> it.level.contains("B1", ignoreCase = true) || it.level.contains("B2", ignoreCase = true) || it.level.contains("Intermediate", ignoreCase = true)
+                        "ADVANCED" -> it.level.contains("C1", ignoreCase = true) || it.level.contains("C2", ignoreCase = true) || it.level.contains("Advanced", ignoreCase = true)
+                        else -> true
+                    }
+                }
+            }
+
+            if (filteredCourses.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 40.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SearchOff,
+                            contentDescription = null,
+                            tint = LinguaXTextTertiary,
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Text(
+                            text = "No courses match the selected filter",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = LinguaXTextSecondary
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(18.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(filteredCourses) { course ->
+                        CourseCardView(
+                            course = course,
+                            l10n = l10n,
+                            onLessonClicked = onLessonClicked
+                        )
+                    }
                 }
             }
         }
@@ -137,14 +222,19 @@ fun CourseCardView(
 ) {
     var isExpanded by remember { mutableStateOf(true) }
 
+    // Calculate total lessons and completed lessons
+    val allLessons = course.units.flatMap { it.lessons }
+    val completedCount = allLessons.count { it.status == LessonStatus.COMPLETED }
+    val progress = if (allLessons.isNotEmpty()) completedCount.toFloat() / allLessons.size.toFloat() else 0f
+
     LinguaX3DCard(
         modifier = Modifier.fillMaxWidth(),
         backgroundColor = Color(0xFF121B2C),
         borderBrush = LinguaXBorderGradient,
         elevation = 6.dp
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            // Header Row
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            // Header Row: Level Badge + Units Count / Collapse Toggle
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -165,8 +255,11 @@ fun CourseCardView(
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.clickable { isExpanded = !isExpanded }
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { isExpanded = !isExpanded }
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Text(
                         text = "${course.units.size} ${l10n.unitsCount}",
@@ -176,35 +269,62 @@ fun CourseCardView(
                     Icon(
                         imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
                         contentDescription = "Toggle",
-                        tint = LinguaXTextSecondary
+                        tint = LinguaXAccentLight
                     )
                 }
             }
 
-            Text(
-                text = course.title,
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontWeight = FontWeight.Black,
-                    fontSize = 19.sp
-                ),
-                color = LinguaXTextPrimary
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = course.title,
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.Black,
+                        fontSize = 19.sp
+                    ),
+                    color = LinguaXTextPrimary
+                )
 
-            Text(
-                text = course.description,
-                style = MaterialTheme.typography.bodyMedium,
-                color = LinguaXTextSecondary
-            )
+                Text(
+                    text = course.description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = LinguaXTextSecondary
+                )
+            }
+
+            // Course Overall Progress
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Course Progress",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = LinguaXTextTertiary
+                    )
+                    Text(
+                        text = "$completedCount / ${allLessons.size} Lessons (${(progress * 100).toInt()}%)",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = LinguaXAccentLight
+                    )
+                }
+                LinguaXProgressBar(
+                    progress = progress,
+                    fillBrush = if (progress >= 1f) LinguaXGreenGradient else LinguaXAccentGradient,
+                    height = 6.dp
+                )
+            }
 
             // Units & Lessons Dropdown Accordion
             AnimatedVisibility(
                 visible = isExpanded,
-                enter = expandVertically(),
-                exit = shrinkVertically()
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
             ) {
                 Column(
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.padding(top = 8.dp)
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    modifier = Modifier.padding(top = 4.dp)
                 ) {
                     course.units.forEach { unit ->
                         UnitSectionView(
@@ -240,7 +360,7 @@ fun UnitSectionView(
         ) {
             Box(
                 modifier = Modifier
-                    .size(6.dp)
+                    .size(8.dp)
                     .clip(CircleShape)
                     .background(LinguaXAccent)
             )
@@ -284,17 +404,21 @@ fun LessonItemRow(
     val isCompleted = lesson.status == LessonStatus.COMPLETED
 
     Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
+        onClick = {
+            if (!isLocked) {
+                onClick()
+            }
+        },
+        shape = RoundedCornerShape(14.dp),
         color = when {
-            isCompleted -> Color(0xFF14242A)
-            !isLocked -> Color(0xFF1C2C47)
-            else -> Color(0xFF131A26)
+            isCompleted -> Color(0xFF132822)
+            !isLocked -> Color(0xFF1A2840)
+            else -> Color(0xFF121824)
         },
         border = androidx.compose.foundation.BorderStroke(
             1.dp,
             when {
-                isCompleted -> LinguaXSuccess.copy(alpha = 0.4f)
+                isCompleted -> LinguaXSuccess.copy(alpha = 0.5f)
                 !isLocked -> LinguaXPrimary.copy(alpha = 0.5f)
                 else -> Color(0xFF1E2838)
             }
@@ -306,18 +430,18 @@ fun LessonItemRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.weight(1f)
             ) {
                 Box(
                     modifier = Modifier
-                        .size(32.dp)
+                        .size(36.dp)
                         .clip(CircleShape)
                         .background(
                             when {
@@ -336,7 +460,7 @@ fun LessonItemRow(
                         },
                         contentDescription = null,
                         tint = Color.White,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(18.dp)
                     )
                 }
 
@@ -352,7 +476,7 @@ fun LessonItemRow(
                     Text(
                         text = "${lesson.durationMins} min • +${lesson.xpReward} XP",
                         style = MaterialTheme.typography.labelSmall,
-                        color = LinguaXTextSecondary
+                        color = if (isCompleted) LinguaXSuccessLight else LinguaXTextSecondary
                     )
                 }
             }
@@ -363,12 +487,23 @@ fun LessonItemRow(
                     color = if (isCompleted) LinguaXSuccess.copy(alpha = 0.2f) else LinguaXPrimary,
                     modifier = Modifier.padding(start = 8.dp)
                 ) {
-                    Text(
-                        text = if (isCompleted) l10n.completedLesson else l10n.startLesson,
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                        color = Color.White,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = if (isCompleted) l10n.completedLesson else l10n.startLesson,
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = Color.White
+                        )
+                        Icon(
+                            imageVector = if (isCompleted) Icons.Default.Check else Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(12.dp)
+                        )
+                    }
                 }
             }
         }

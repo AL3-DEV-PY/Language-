@@ -30,12 +30,17 @@ import com.example.ui.screens.auth.LoginScreen
 import com.example.ui.screens.auth.SignupScreen
 import com.example.ui.screens.challenges.ChallengesScreen
 import com.example.ui.screens.courses.CoursesScreen
-import com.example.ui.screens.courses.LessonPreviewDialog
+import com.example.ui.screens.courses.LessonScreen
 import com.example.ui.screens.home.HomeScreen
+import com.example.ui.screens.leaderboard.LeaderboardScreen
+import com.example.ui.screens.practice.FlashcardReviewScreen
+import com.example.ui.screens.practice.PracticeScreen
 import com.example.ui.screens.profile.ProfileScreen
 import com.example.ui.screens.vocabulary.VocabularyScreen
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.AuthState
+import com.example.ui.viewmodel.FlashcardUiState
+import com.example.ui.viewmodel.LessonUiState
 import com.example.ui.viewmodel.MainViewModel
 
 enum class AuthSubScreen {
@@ -45,8 +50,8 @@ enum class AuthSubScreen {
 enum class MainTab(val icon: ImageVector) {
     HOME(Icons.Default.Home),
     COURSES(Icons.Default.School),
-    VOCABULARY(Icons.AutoMirrored.Filled.MenuBook),
-    CHALLENGES(Icons.Default.EmojiEvents),
+    PRACTICE(Icons.Default.Psychology),
+    LEADERBOARD(Icons.Default.Leaderboard),
     PROFILE(Icons.Default.Person)
 }
 
@@ -77,8 +82,9 @@ fun LinguaXApp(viewModel: MainViewModel = viewModel()) {
     val vocabularyResource by viewModel.vocabularyState.collectAsStateWithLifecycle()
     val challengesResource by viewModel.challengesState.collectAsStateWithLifecycle()
     val achievementsResource by viewModel.achievementsState.collectAsStateWithLifecycle()
-    val selectedLessonForDialog by viewModel.selectedLessonForDialog.collectAsStateWithLifecycle()
-    val activeExercisesResource by viewModel.activeExercisesState.collectAsStateWithLifecycle()
+    val leaderboardResource by viewModel.leaderboardState.collectAsStateWithLifecycle()
+    val lessonState by viewModel.lessonState.collectAsStateWithLifecycle()
+    val flashcardState by viewModel.flashcardState.collectAsStateWithLifecycle()
 
     // Dynamic RTL / LTR layout provider
     CompositionLocalProvider(LocalLayoutDirection provides appLanguage.layoutDirection) {
@@ -104,7 +110,14 @@ fun LinguaXApp(viewModel: MainViewModel = viewModel()) {
                                 l10n = l10n,
                                 authState = state,
                                 onLogin = { email, pass -> viewModel.login(email, pass) },
-                                onNavigateToSignup = { authSubScreen = AuthSubScreen.SIGNUP }
+                                onNavigateToSignup = {
+                                    viewModel.clearAuthError()
+                                    authSubScreen = AuthSubScreen.SIGNUP
+                                },
+                                onBack = {
+                                    viewModel.clearAuthError()
+                                    authSubScreen = AuthSubScreen.LANDING
+                                }
                             )
                         }
                         AuthSubScreen.SIGNUP -> {
@@ -112,7 +125,14 @@ fun LinguaXApp(viewModel: MainViewModel = viewModel()) {
                                 l10n = l10n,
                                 authState = state,
                                 onSignup = { email, pass, name -> viewModel.signup(email, pass, name) },
-                                onNavigateToLogin = { authSubScreen = AuthSubScreen.LOGIN }
+                                onNavigateToLogin = {
+                                    viewModel.clearAuthError()
+                                    authSubScreen = AuthSubScreen.LOGIN
+                                },
+                                onBack = {
+                                    viewModel.clearAuthError()
+                                    authSubScreen = AuthSubScreen.LANDING
+                                }
                             )
                         }
                     }
@@ -120,129 +140,146 @@ fun LinguaXApp(viewModel: MainViewModel = viewModel()) {
                 is AuthState.Authenticated -> {
                     val profile = state.session.profile
 
-                    Scaffold(
-                        bottomBar = {
-                            NavigationBar(
-                                containerColor = LinguaXSurface,
-                                tonalElevation = 8.dp,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
-                            ) {
-                                MainTab.values().forEach { tab ->
-                                    val isSelected = currentTab == tab
-                                    val label = when (tab) {
-                                        MainTab.HOME -> l10n.homeTab
-                                        MainTab.COURSES -> l10n.coursesTab
-                                        MainTab.VOCABULARY -> l10n.vocabularyTab
-                                        MainTab.CHALLENGES -> l10n.challengesTab
-                                        MainTab.PROFILE -> l10n.profileTab
-                                    }
-
-                                    NavigationBarItem(
-                                        selected = isSelected,
-                                        onClick = { currentTab = tab },
-                                        icon = {
-                                            Icon(
-                                                imageVector = tab.icon,
-                                                contentDescription = label
-                                            )
-                                        },
-                                        label = {
-                                            Text(
-                                                text = label,
-                                                style = MaterialTheme.typography.labelSmall
-                                            )
-                                        },
-                                        colors = NavigationBarItemDefaults.colors(
-                                            selectedIconColor = LinguaXAccent,
-                                            selectedTextColor = LinguaXAccent,
-                                            unselectedIconColor = LinguaXTextTertiary,
-                                            unselectedTextColor = LinguaXTextTertiary,
-                                            indicatorColor = LinguaXPrimaryContainer
-                                        ),
-                                        modifier = Modifier.testTag("nav_tab_${tab.name.lowercase()}")
-                                    )
-                                }
-                            }
-                        }
-                    ) { innerPadding ->
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(innerPadding)
-                                .background(LinguaXBackground)
-                        ) {
-                            when (currentTab) {
-                                MainTab.HOME -> {
-                                    HomeScreen(
-                                        l10n = l10n,
-                                        profile = profile,
-                                        selectedTargetLanguage = selectedTargetLanguage,
-                                        languagesResource = languagesResource,
-                                        coursesResource = coursesResource,
-                                        challengesResource = challengesResource,
-                                        onLanguageSelected = { viewModel.setSelectedTargetLanguage(it) },
-                                        onNavigateToCourses = { currentTab = MainTab.COURSES },
-                                        onNavigateToVocabulary = { currentTab = MainTab.VOCABULARY },
-                                        onNavigateToChallenges = { currentTab = MainTab.CHALLENGES },
-                                        onOpenSettings = { currentTab = MainTab.PROFILE }
-                                    )
-                                }
-                                MainTab.COURSES -> {
-                                    CoursesScreen(
-                                        l10n = l10n,
-                                        selectedTargetLanguage = selectedTargetLanguage,
-                                        languagesResource = languagesResource,
-                                        coursesResource = coursesResource,
-                                        onLanguageSelected = { viewModel.setSelectedTargetLanguage(it) },
-                                        onLessonClicked = { lesson -> viewModel.openLessonPreview(lesson) }
-                                    )
-                                }
-                                MainTab.VOCABULARY -> {
-                                    VocabularyScreen(
-                                        l10n = l10n,
-                                        selectedTargetLanguage = selectedTargetLanguage,
-                                        vocabularyResource = vocabularyResource,
-                                        onToggleBookmark = { viewModel.toggleVocabularyBookmark(it) }
-                                    )
-                                }
-                                MainTab.CHALLENGES -> {
-                                    ChallengesScreen(
-                                        l10n = l10n,
-                                        challengesResource = challengesResource,
-                                        onClaimReward = { challenge ->
-                                            viewModel.updateProfile(
-                                                newDisplayName = profile.displayName ?: "Learner",
-                                                newGoal = profile.dailyGoal
-                                            )
+                    if (lessonState !is LessonUiState.Idle) {
+                        LessonScreen(
+                            l10n = l10n,
+                            lessonState = lessonState,
+                            onSelectOption = { viewModel.selectLessonOption(it) },
+                            onCheckAnswer = { viewModel.checkLessonAnswer() },
+                            onProceed = { viewModel.proceedLessonExercise() },
+                            onRetrySave = { viewModel.retrySaveLesson() },
+                            onExit = { viewModel.exitLesson() }
+                        )
+                    } else if (flashcardState !is FlashcardUiState.Idle) {
+                        FlashcardReviewScreen(
+                            l10n = l10n,
+                            flashcardState = flashcardState,
+                            onFlip = { viewModel.flipFlashcard() },
+                            onRate = { viewModel.recordFlashcardRating(it) },
+                            onExit = { viewModel.exitFlashcards() }
+                        )
+                    } else {
+                        Scaffold(
+                            bottomBar = {
+                                NavigationBar(
+                                    containerColor = LinguaXSurface,
+                                    tonalElevation = 8.dp,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                                ) {
+                                    MainTab.values().forEach { tab ->
+                                        val isSelected = currentTab == tab
+                                        val label = when (tab) {
+                                            MainTab.HOME -> l10n.homeTab
+                                            MainTab.COURSES -> l10n.coursesTab
+                                            MainTab.PRACTICE -> l10n.practiceTab
+                                            MainTab.LEADERBOARD -> l10n.leaderboardTab
+                                            MainTab.PROFILE -> l10n.profileTab
                                         }
-                                    )
-                                }
-                                MainTab.PROFILE -> {
-                                    ProfileScreen(
-                                        l10n = l10n,
-                                        profile = profile,
-                                        currentAppLanguage = appLanguage,
-                                        selectedTargetLanguage = selectedTargetLanguage,
-                                        onAppLanguageChange = { viewModel.setAppLanguage(it) },
-                                        onUpdateProfile = { name, goal -> viewModel.updateProfile(name, goal) },
-                                        onLogout = { viewModel.logout() }
-                                    )
+
+                                        NavigationBarItem(
+                                            selected = isSelected,
+                                            onClick = { currentTab = tab },
+                                            icon = {
+                                                Icon(
+                                                    imageVector = tab.icon,
+                                                    contentDescription = label
+                                                )
+                                            },
+                                            label = {
+                                                Text(
+                                                    text = label,
+                                                    style = MaterialTheme.typography.labelSmall
+                                                )
+                                            },
+                                            colors = NavigationBarItemDefaults.colors(
+                                                selectedIconColor = LinguaXAccent,
+                                                selectedTextColor = LinguaXAccent,
+                                                unselectedIconColor = LinguaXTextTertiary,
+                                                unselectedTextColor = LinguaXTextTertiary,
+                                                indicatorColor = LinguaXPrimaryContainer
+                                            ),
+                                            modifier = Modifier.testTag("nav_tab_${tab.name.lowercase()}")
+                                        )
+                                    }
                                 }
                             }
-                        }
-
-                        // Dynamic 3D Interactive Lesson Dialog
-                        selectedLessonForDialog?.let { lesson ->
-                            LessonPreviewDialog(
-                                lesson = lesson,
-                                l10n = l10n,
-                                exercisesResource = activeExercisesResource,
-                                onDismiss = { viewModel.dismissLessonPreview() },
-                                onCompleteLesson = {
-                                    viewModel.completeLesson(lesson)
+                        ) { innerPadding ->
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(innerPadding)
+                                    .background(LinguaXBackground)
+                            ) {
+                                when (currentTab) {
+                                    MainTab.HOME -> {
+                                        HomeScreen(
+                                            l10n = l10n,
+                                            profile = profile,
+                                            selectedTargetLanguage = selectedTargetLanguage,
+                                            languagesResource = languagesResource,
+                                            coursesResource = coursesResource,
+                                            challengesResource = challengesResource,
+                                            onLanguageSelected = { viewModel.setSelectedTargetLanguage(it) },
+                                            onNavigateToCourses = { currentTab = MainTab.COURSES },
+                                            onNavigateToVocabulary = { currentTab = MainTab.PRACTICE },
+                                            onNavigateToChallenges = { currentTab = MainTab.PRACTICE },
+                                            onOpenSettings = { currentTab = MainTab.PROFILE },
+                                            onOpenLesson = { lesson -> viewModel.openLesson(lesson) }
+                                        )
+                                    }
+                                    MainTab.COURSES -> {
+                                        CoursesScreen(
+                                            l10n = l10n,
+                                            selectedTargetLanguage = selectedTargetLanguage,
+                                            languagesResource = languagesResource,
+                                            coursesResource = coursesResource,
+                                            onLanguageSelected = { viewModel.setSelectedTargetLanguage(it) },
+                                            onLessonClicked = { lesson -> viewModel.openLesson(lesson) }
+                                        )
+                                    }
+                                    MainTab.PRACTICE -> {
+                                        PracticeScreen(
+                                            l10n = l10n,
+                                            profile = profile,
+                                            selectedTargetLanguage = selectedTargetLanguage,
+                                            vocabularyResource = vocabularyResource,
+                                            challengesResource = challengesResource,
+                                            onToggleBookmark = { viewModel.toggleVocabularyBookmark(it) },
+                                            onStartFlashcards = { items, isSmartReview ->
+                                                viewModel.startFlashcardReview(items, isSmartReview)
+                                            },
+                                            onClaimChallengeReward = { challenge ->
+                                                viewModel.updateProfile(
+                                                    newDisplayName = profile.displayName ?: "Learner",
+                                                    newGoal = profile.dailyGoal
+                                                )
+                                            }
+                                        )
+                                    }
+                                    MainTab.LEADERBOARD -> {
+                                        LeaderboardScreen(
+                                            l10n = l10n,
+                                            profile = profile,
+                                            selectedTargetLanguage = selectedTargetLanguage,
+                                            leaderboardResource = leaderboardResource,
+                                            onRetry = { viewModel.loadLeaderboard() }
+                                        )
+                                    }
+                                    MainTab.PROFILE -> {
+                                        ProfileScreen(
+                                            l10n = l10n,
+                                            profile = profile,
+                                            currentAppLanguage = appLanguage,
+                                            selectedTargetLanguage = selectedTargetLanguage,
+                                            achievementsResource = achievementsResource,
+                                            onAppLanguageChange = { viewModel.setAppLanguage(it) },
+                                            onUpdateProfile = { name, goal -> viewModel.updateProfile(name, goal) },
+                                            onLogout = { viewModel.logout() }
+                                        )
+                                    }
                                 }
-                            )
+                            }
                         }
                     }
                 }

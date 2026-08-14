@@ -35,14 +35,16 @@ private fun JSONObject.optNullableString(key: String): String? {
     return if (value == "null" || value.isEmpty()) null else value
 }
 
-class LinguaXRepository {
+class LinguaXRepository(
+    private val sessionManager: com.example.data.supabase.SessionManager? = null
+) {
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
         .build()
 
-    private val _currentSession = MutableStateFlow<UserSession?>(null)
+    private val _currentSession = MutableStateFlow<UserSession?>(sessionManager?.loadSession())
     val currentSession: StateFlow<UserSession?> = _currentSession.asStateFlow()
 
     // Default target language: Arabic or English
@@ -60,8 +62,11 @@ class LinguaXRepository {
     )
     val selectedLanguage: StateFlow<LanguageItem> = _selectedLanguage.asStateFlow()
 
-    // Local in-memory caches
-    private val completedLessonIds = mutableSetOf("l_ar_1", "l_en_1", "l_fr_1", "l_es_1")
+    // Local in-memory caches and persistent completed lessons
+    private val completedLessonIds = mutableSetOf("l_ar_1", "l_en_1", "l_fr_1", "l_es_1").apply {
+        sessionManager?.getCompletedLessonIds()?.let { addAll(it) }
+    }
+    private val rewardedLessonIds = mutableSetOf<String>()
     private val bookmarkedVocabIds = mutableSetOf("v_ar_1", "v_ar_2", "v_en_1", "v_fr_1")
 
     fun setSelectedLanguage(language: LanguageItem) {
@@ -85,6 +90,7 @@ class LinguaXRepository {
                 )
             )
             _currentSession.value = mockUser
+            sessionManager?.saveSession(mockUser)
             return@withContext Resource.Success(mockUser)
         }
 
@@ -121,6 +127,7 @@ class LinguaXRepository {
 
                 val session = UserSession(userId, userEmail, token, profile)
                 _currentSession.value = session
+                sessionManager?.saveSession(session)
                 Resource.Success(session)
             } else {
                 val errMsg = if (responseString.isNotBlank()) {
@@ -151,6 +158,7 @@ class LinguaXRepository {
                 )
             )
             _currentSession.value = mockUser
+            sessionManager?.saveSession(mockUser)
             return@withContext Resource.Success(mockUser)
         }
 
@@ -187,6 +195,7 @@ class LinguaXRepository {
 
                 val session = UserSession(userId, userEmail, token, profile)
                 _currentSession.value = session
+                sessionManager?.saveSession(session)
                 Resource.Success(session)
             } else {
                 val errMsg = try { JSONObject(responseString).optString("msg", "Signup failed") } catch (_: Exception) { "Signup error (${response.code})" }
@@ -199,6 +208,7 @@ class LinguaXRepository {
 
     fun logout() {
         _currentSession.value = null
+        sessionManager?.clearSession()
     }
 
     private fun fetchProfileFromSupabase(userId: String, token: String?): Profile? {
@@ -233,7 +243,9 @@ class LinguaXRepository {
     suspend fun updateProfile(profile: Profile): Resource<Profile> = withContext(Dispatchers.IO) {
         val session = _currentSession.value
         if (session != null) {
-            _currentSession.value = session.copy(profile = profile)
+            val updated = session.copy(profile = profile)
+            _currentSession.value = updated
+            sessionManager?.saveSession(updated)
         }
 
         if (!SupabaseConfig.isConfigured) {
@@ -244,10 +256,10 @@ class LinguaXRepository {
             val jsonBody = JSONObject().apply {
                 put("display_name", profile.displayName)
                 put("username", profile.username)
+                if (profile.avatarUrl != null) {
+                    put("avatar_url", profile.avatarUrl)
+                }
                 put("daily_goal", profile.dailyGoal)
-                put("xp", profile.xp)
-                put("coins", profile.coins)
-                put("streak", profile.streak)
             }
             val request = Request.Builder()
                 .url("${SupabaseConfig.url}/rest/v1/profiles?id=eq.${profile.id}")
@@ -269,16 +281,119 @@ class LinguaXRepository {
         }
     }
 
-    suspend fun recordLessonCompleted(lessonId: String, xpEarned: Int, coinsEarned: Int) {
-        completedLessonIds.add(lessonId)
-        val session = _currentSession.value
-        if (session != null) {
-            val updated = session.profile.copy(
-                xp = session.profile.xp + xpEarned,
-                coins = session.profile.coins + coinsEarned,
-                streak = if (session.profile.streak == 0) 1 else session.profile.streak
+    suspend fun completeLesson(
+        lessonId: String
+    ): Resource<LessonCompletionResult> = withContext(Dispatchers.IO) {
+        val session = _currentSession.value ?: return@withContext Resource.Error("No active user session")
+
+        if (!SupabaseConfig.isConfigured) {
+            val isAlreadyCompleted = completedLessonIds.contains(lessonId)
+            completedLessonIds.add(lessonId)
+            sessionManager?.saveCompletedLessonId(lessonId)
+
+            val xpToAdd = if (isAlreadyCompleted) 0 else 15
+            val coinsToAdd = if (isAlreadyCompleted) 0 else 10
+
+            val updatedProfile = session.profile.copy(
+                xp = session.profile.xp + xpToAdd,
+                coins = session.profile.coins + coinsToAdd
             )
-            updateProfile(updated)
+            val updatedSession = session.copy(profile = updatedProfile)
+            _currentSession.value = updatedSession
+            sessionManager?.saveSession(updatedSession)
+
+            return@withContext Resource.Success(
+                LessonCompletionResult(
+                    success = true,
+                    rewarded = !isAlreadyCompleted,
+                    xpEarned = xpToAdd,
+                    coinsEarned = coinsToAdd,
+                    profile = updatedProfile
+                )
+            )
+        }
+
+        try {
+            val jsonBody = JSONObject().apply {
+                put("p_lesson_id", lessonId)
+            }
+            val request = Request.Builder()
+                .url("${SupabaseConfig.url}/rest/v1/rpc/complete_lesson")
+                .header("apikey", SupabaseConfig.anonKey)
+                .apply {
+                    session.accessToken?.let { header("Authorization", "Bearer $it") }
+                }
+                .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            val responseString = response.body?.string() ?: ""
+
+            if (response.isSuccessful && responseString.isNotBlank()) {
+                val json = JSONObject(responseString)
+                val success = json.optBoolean("success", true)
+                val rewarded = json.optBoolean("rewarded", true)
+                val xpEarned = json.optInt("xp_earned", 0)
+                val coinsEarned = json.optInt("coins_earned", 0)
+                val profileObj = json.optJSONObject("profile")
+
+                val updatedProfile = if (profileObj != null) {
+                    Profile(
+                        id = profileObj.getString("id"),
+                        username = profileObj.optNullableString("username"),
+                        displayName = profileObj.optString("display_name", session.profile.displayName ?: "Learner"),
+                        avatarUrl = profileObj.optNullableString("avatar_url"),
+                        xp = profileObj.optInt("xp", session.profile.xp),
+                        coins = profileObj.optInt("coins", session.profile.coins),
+                        streak = profileObj.optInt("streak", session.profile.streak),
+                        dailyGoal = profileObj.optInt("daily_goal", session.profile.dailyGoal)
+                    )
+                } else {
+                    session.profile
+                }
+
+                completedLessonIds.add(lessonId)
+                sessionManager?.saveCompletedLessonId(lessonId)
+
+                val updatedSession = session.copy(profile = updatedProfile)
+                _currentSession.value = updatedSession
+                sessionManager?.saveSession(updatedSession)
+
+                Resource.Success(
+                    LessonCompletionResult(
+                        success = success,
+                        rewarded = rewarded,
+                        xpEarned = xpEarned,
+                        coinsEarned = coinsEarned,
+                        profile = updatedProfile
+                    )
+                )
+            } else {
+                val errorMsg = try {
+                    val errJson = JSONObject(responseString)
+                    errJson.optString("message", errJson.optString("msg", "Error completing lesson: ${response.code}"))
+                } catch (_: Exception) {
+                    "Error completing lesson (HTTP ${response.code})"
+                }
+                Resource.Error(errorMsg)
+            }
+        } catch (e: Exception) {
+            Resource.Error("Network error completing lesson: ${e.localizedMessage}", e)
+        }
+    }
+
+    suspend fun recordLessonCompleted(
+        lessonId: String,
+        xpEarned: Int,
+        coinsEarned: Int,
+        completionToken: String = lessonId
+    ): Resource<Profile> {
+        val result = completeLesson(lessonId)
+        return when (result) {
+            is Resource.Success -> Resource.Success(result.data.profile ?: _currentSession.value?.profile ?: Profile(id = ""))
+            is Resource.Error -> Resource.Error(result.message, result.cause)
+            is Resource.Loading -> Resource.Loading
+            is Resource.Empty -> Resource.Empty
         }
     }
 
@@ -861,6 +976,59 @@ class LinguaXRepository {
             AchievementItem("ach_5", "Vocabulary Titan", "Bookmarked and mastered 20 vocabulary cards", "book", "Vocabulary", 20, false, null, 12)
         )
         Resource.Success(list)
+    }
+
+    suspend fun getLeaderboard(): Resource<List<LeaderboardEntry>> = withContext(Dispatchers.IO) {
+        val currentUserId = _currentSession.value?.userId ?: ""
+        if (SupabaseConfig.isConfigured) {
+            try {
+                val request = Request.Builder()
+                    .url("${SupabaseConfig.url}/rest/v1/leaderboard_profiles?select=id,username,display_name,avatar_url,xp&order=xp.desc&limit=50")
+                    .header("apikey", SupabaseConfig.anonKey)
+                    .build()
+                val response = httpClient.newCall(request).execute()
+                val str = response.body?.string() ?: ""
+                if (response.isSuccessful && str.isNotBlank()) {
+                    val jsonArray = JSONArray(str)
+                    val list = mutableListOf<LeaderboardEntry>()
+                    for (i in 0 until jsonArray.length()) {
+                        val obj = jsonArray.getJSONObject(i)
+                        val id = obj.getString("id")
+                        list.add(
+                            LeaderboardEntry(
+                                id = id,
+                                username = obj.optNullableString("username"),
+                                displayName = obj.optString("display_name", "Learner"),
+                                avatarUrl = obj.optNullableString("avatar_url"),
+                                xp = obj.optInt("xp", 0),
+                                rank = i + 1,
+                                isCurrentUser = id == currentUserId
+                            )
+                        )
+                    }
+                    if (list.isNotEmpty()) return@withContext Resource.Success(list)
+                }
+            } catch (_: Exception) {}
+        }
+
+        // Local dynamic ranking of active session
+        val currentProfile = _currentSession.value?.profile
+        val entries = if (currentProfile != null) {
+            listOf(
+                LeaderboardEntry(
+                    id = currentProfile.id,
+                    username = currentProfile.username,
+                    displayName = currentProfile.displayName ?: "Learner",
+                    avatarUrl = currentProfile.avatarUrl,
+                    xp = currentProfile.xp,
+                    rank = 1,
+                    isCurrentUser = true
+                )
+            )
+        } else {
+            emptyList()
+        }
+        Resource.Success(entries)
     }
 
     suspend fun getExercisesForLesson(lessonId: String): Resource<List<Exercise>> = withContext(Dispatchers.IO) {

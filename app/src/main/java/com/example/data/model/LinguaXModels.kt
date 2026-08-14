@@ -150,3 +150,23 @@ data class UserProgress(
     @Json(name = "xp_earned") val xpEarned: Int = 0,
     @Json(name = "updated_at") val updatedAt: String? = null
 )
+
+@JsonClass(generateAdapter = true)
+data class LeaderboardEntry(
+    @Json(name = "id") val id: String,
+    @Json(name = "username") val username: String? = null,
+    @Json(name = "display_name") val displayName: String = "Learner",
+    @Json(name = "avatar_url") val avatarUrl: String? = null,
+    @Json(name = "xp") val xp: Int = 0,
+    @Json(name = "rank") val rank: Int = 1,
+    @Json(name = "is_current_user") val isCurrentUser: Boolean = false
+)
+
+@JsonClass(generateAdapter = true)
+data class LessonCompletionResult(
+    @Json(name = "success") val success: Boolean = true,
+    @Json(name = "rewarded") val rewarded: Boolean = true,
+    @Json(name = "xp_earned") val xpEarned: Int = 0,
+    @Json(name = "coins_earned") val coinsEarned: Int = 0,
+    @Json(name = "profile") val profile: Profile? = null
+)
