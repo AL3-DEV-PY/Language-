@@ -87,7 +87,7 @@ fun HomeScreen(
     }
     val userDisplayName = profile.displayName?.takeIf { it.isNotBlank() } ?: "Learner"
 
-    // Calculate completed lessons from active courses
+    // Calculate completed lessons strictly from active courses
     val completedLessonsCount = remember(coursesResource) {
         if (coursesResource is Resource.Success) {
             coursesResource.data.flatMap { course ->
@@ -96,14 +96,13 @@ fun HomeScreen(
                 }
             }.size
         } else {
-            // Safe fallback estimate based on completed XP
-            maxOf(0, currentXp / 25)
+            0
         }
     }
 
-    // Calculate daily progress safely
+    // Calculate daily progress safely based on real user XP
     val dailyGoal = profile.dailyGoal.coerceAtLeast(10)
-    val dailyProgressXp = minOf(dailyGoal, maxOf(10, currentXp % (dailyGoal + 15)))
+    val dailyProgressXp = minOf(dailyGoal, currentXp.coerceAtLeast(0))
     val dailyGoalPercent = (dailyProgressXp.toFloat() / dailyGoal.toFloat()).coerceIn(0f, 1f)
 
     Box(

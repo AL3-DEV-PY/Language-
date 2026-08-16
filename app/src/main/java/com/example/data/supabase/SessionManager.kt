@@ -33,14 +33,18 @@ class SessionManager(context: Context) {
         return prefs.getString(KEY_APP_LANGUAGE, null)
     }
 
-    fun saveCompletedLessonId(lessonId: String) {
-        val current = getCompletedLessonIds().toMutableSet()
-        current.add(lessonId)
+    fun saveCompletedLessonId(lessonId: Long) {
+        val current = getCompletedLessonIdStrings().toMutableSet()
+        current.add(lessonId.toString())
         prefs.edit().putStringSet(KEY_COMPLETED_LESSONS, current).apply()
     }
 
-    fun getCompletedLessonIds(): Set<String> {
+    private fun getCompletedLessonIdStrings(): Set<String> {
         return prefs.getStringSet(KEY_COMPLETED_LESSONS, emptySet()) ?: emptySet()
+    }
+
+    fun getCompletedLessonIds(): Set<Long> {
+        return getCompletedLessonIdStrings().mapNotNull { it.toLongOrNull() }.toSet()
     }
 
     fun saveSession(session: UserSession) {

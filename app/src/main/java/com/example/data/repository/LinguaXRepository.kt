@@ -1,6 +1,7 @@
 package com.example.data.repository
 
 import com.example.data.model.*
+import com.example.data.supabase.SessionManager
 import com.example.data.supabase.SupabaseConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,38 +37,38 @@ private fun JSONObject.optNullableString(key: String): String? {
 }
 
 class LinguaXRepository(
-    val sessionManager: com.example.data.supabase.SessionManager? = null
+    val sessionManager: SessionManager? = null
 ) {
 
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(12, TimeUnit.SECONDS)
+        .writeTimeout(12, TimeUnit.SECONDS)
         .build()
 
     private val _currentSession = MutableStateFlow<UserSession?>(sessionManager?.loadSession())
     val currentSession: StateFlow<UserSession?> = _currentSession.asStateFlow()
 
-    // Default target language: Arabic or English
+    // Default target language (ID: 1L - Arabic)
     private val _selectedLanguage = MutableStateFlow<LanguageItem>(
         LanguageItem(
-            id = "lang_ar",
+            id = 1L,
             name = "Arabic",
             nativeName = "العربية",
             code = "ar",
             flagEmoji = "🇸🇦",
             description = "Master Modern Standard Arabic, grammar & everyday conversations.",
-            learnersCount = 35000,
+            learnersCount = 0,
             sortOrder = 1
         )
     )
     val selectedLanguage: StateFlow<LanguageItem> = _selectedLanguage.asStateFlow()
 
-    // Local in-memory caches and persistent completed lessons
-    private val completedLessonIds = mutableSetOf("l_ar_1", "l_en_1", "l_fr_1", "l_es_1").apply {
+    // Real persistent completed lesson IDs (No hardcoded mock IDs!)
+    private val completedLessonIds = mutableSetOf<Long>().apply {
         sessionManager?.getCompletedLessonIds()?.let { addAll(it) }
     }
-    private val rewardedLessonIds = mutableSetOf<String>()
-    private val bookmarkedVocabIds = mutableSetOf("v_ar_1", "v_ar_2", "v_en_1", "v_fr_1")
+    private val bookmarkedVocabIds = mutableSetOf<Long>()
 
     fun setSelectedLanguage(language: LanguageItem) {
         _selectedLanguage.value = language
@@ -99,19 +100,24 @@ class LinguaXRepository(
                 val userId = userObj.getString("id")
                 val userEmail = userObj.optString("email", email)
 
+                // Fetch real profile or initialize a fresh profile with 0 XP / 0 streak
                 val profile = fetchProfileFromSupabase(userId, token) ?: run {
+                    val cleanUsername = userEmail.substringBefore("@")
                     val newProf = Profile(
                         id = userId,
-                        username = userEmail.substringBefore("@"),
-                        displayName = userEmail.substringBefore("@").capitalizeWords(),
+                        username = cleanUsername,
+                        displayName = cleanUsername.capitalizeWords(),
                         xp = 0,
                         coins = 0,
-                        streak = 1,
+                        streak = 0,
                         dailyGoal = 20
                     )
                     createOrUpdateProfileInSupabase(newProf, token)
                     newProf
                 }
+
+                // Sync user's real completed lessons from user_progress table
+                fetchAndSyncUserProgress(userId, token)
 
                 val session = UserSession(userId, userEmail, token, profile)
                 _currentSession.value = session
@@ -119,8 +125,12 @@ class LinguaXRepository(
                 Resource.Success(session)
             } else {
                 val errMsg = if (responseString.isNotBlank()) {
-                    try { JSONObject(responseString).optString("error_description", "Invalid login credentials") }
-                    catch (_: Exception) { "Login failed (${response.code})" }
+                    try {
+                        val errObj = JSONObject(responseString)
+                        errObj.optString("error_description", errObj.optString("msg", "Invalid login credentials"))
+                    } catch (_: Exception) {
+                        "Login failed (${response.code})"
+                    }
                 } else "Login failed (${response.code})"
                 Resource.Error(errMsg)
             }
@@ -135,12 +145,15 @@ class LinguaXRepository(
         }
 
         try {
+            val cleanDisplayName = displayName.trim().ifBlank { email.substringBefore("@").capitalizeWords() }
+            val cleanUsername = email.substringBefore("@")
+
             val jsonBody = JSONObject().apply {
                 put("email", email)
                 put("password", password)
                 put("data", JSONObject().apply {
-                    put("display_name", displayName)
-                    put("username", email.substringBefore("@"))
+                    put("display_name", cleanDisplayName)
+                    put("username", cleanUsername)
                 })
             }
             val request = Request.Builder()
@@ -163,28 +176,36 @@ class LinguaXRepository(
                 }
 
                 val userEmail = userObj.optString("email", email)
-                val cleanDisplayName = displayName.trim().ifBlank { userEmail.substringBefore("@").capitalizeWords() }
 
+                // Fresh user profile with 0 XP / 0 Coins / 0 Streak
                 val profile = fetchProfileFromSupabase(userId, token) ?: run {
                     val newProf = Profile(
                         id = userId,
-                        username = userEmail.substringBefore("@"),
+                        username = cleanUsername,
                         displayName = cleanDisplayName,
                         xp = 0,
                         coins = 0,
-                        streak = 1,
+                        streak = 0,
                         dailyGoal = 20
                     )
                     createOrUpdateProfileInSupabase(newProf, token)
                     newProf
                 }
 
+                // Clear any leftover local state for new user
+                completedLessonIds.clear()
+
                 val session = UserSession(userId, userEmail, token, profile)
                 _currentSession.value = session
                 sessionManager?.saveSession(session)
                 Resource.Success(session)
             } else {
-                val errMsg = try { JSONObject(responseString).optString("msg", "Signup failed") } catch (_: Exception) { "Signup error (${response.code})" }
+                val errMsg = try {
+                    val errObj = JSONObject(responseString)
+                    errObj.optString("msg", errObj.optString("error_description", "Signup failed (${response.code})"))
+                } catch (_: Exception) {
+                    "Signup error (${response.code})"
+                }
                 Resource.Error(errMsg)
             }
         } catch (e: Exception) {
@@ -194,6 +215,8 @@ class LinguaXRepository(
 
     fun logout() {
         _currentSession.value = null
+        completedLessonIds.clear()
+        bookmarkedVocabIds.clear()
         sessionManager?.clearSession()
     }
 
@@ -224,7 +247,7 @@ class LinguaXRepository(
     private fun fetchProfileFromSupabase(userId: String, token: String?): Profile? {
         return try {
             val reqBuilder = Request.Builder()
-                .url("${SupabaseConfig.url}/rest/v1/profiles?id=eq.$userId")
+                .url("${SupabaseConfig.url}/rest/v1/profiles?id=eq.$userId&select=*")
                 .header("apikey", SupabaseConfig.anonKey)
             if (!token.isNullOrBlank()) {
                 reqBuilder.header("Authorization", "Bearer $token")
@@ -242,12 +265,38 @@ class LinguaXRepository(
                         avatarUrl = obj.optNullableString("avatar_url"),
                         xp = obj.optInt("xp", 0),
                         coins = obj.optInt("coins", 0),
-                        streak = obj.optInt("streak", 1),
-                        dailyGoal = obj.optInt("daily_goal", 20)
+                        streak = obj.optInt("streak", 0),
+                        dailyGoal = obj.optInt("daily_goal", 20),
+                        createdAt = obj.optNullableString("created_at"),
+                        updatedAt = obj.optNullableString("updated_at")
                     )
                 } else null
             } else null
         } catch (_: Exception) { null }
+    }
+
+    private fun fetchAndSyncUserProgress(userId: String, token: String?) {
+        try {
+            val reqBuilder = Request.Builder()
+                .url("${SupabaseConfig.url}/rest/v1/user_progress?user_id=eq.$userId&completed=eq.true&select=lesson_id")
+                .header("apikey", SupabaseConfig.anonKey)
+            if (!token.isNullOrBlank()) {
+                reqBuilder.header("Authorization", "Bearer $token")
+            }
+            val response = httpClient.newCall(reqBuilder.build()).execute()
+            val resStr = response.body?.string() ?: ""
+            if (response.isSuccessful && resStr.isNotBlank()) {
+                val array = JSONArray(resStr)
+                for (i in 0 until array.length()) {
+                    val obj = array.getJSONObject(i)
+                    val lessonId = obj.optLong("lesson_id", -1L)
+                    if (lessonId > 0) {
+                        completedLessonIds.add(lessonId)
+                        sessionManager?.saveCompletedLessonId(lessonId)
+                    }
+                }
+            }
+        } catch (_: Exception) {}
     }
 
     suspend fun updateProfile(profile: Profile): Resource<Profile> = withContext(Dispatchers.IO) {
@@ -292,51 +341,27 @@ class LinguaXRepository(
     }
 
     suspend fun completeLesson(
-        lessonId: String
+        lessonId: Long
     ): Resource<LessonCompletionResult> = withContext(Dispatchers.IO) {
-        val session = _currentSession.value ?: return@withContext Resource.Error("No active user session")
+        val session = _currentSession.value ?: return@withContext Resource.Error("No active user session. Please sign in.")
 
         if (!SupabaseConfig.isConfigured) {
-            val isAlreadyCompleted = completedLessonIds.contains(lessonId)
-            completedLessonIds.add(lessonId)
-            sessionManager?.saveCompletedLessonId(lessonId)
-
-            val xpToAdd = if (isAlreadyCompleted) 0 else 15
-            val coinsToAdd = if (isAlreadyCompleted) 0 else 10
-
-            val updatedProfile = session.profile.copy(
-                xp = session.profile.xp + xpToAdd,
-                coins = session.profile.coins + coinsToAdd
-            )
-            val updatedSession = session.copy(profile = updatedProfile)
-            _currentSession.value = updatedSession
-            sessionManager?.saveSession(updatedSession)
-
-            return@withContext Resource.Success(
-                LessonCompletionResult(
-                    success = true,
-                    rewarded = !isAlreadyCompleted,
-                    xpEarned = xpToAdd,
-                    coinsEarned = coinsToAdd,
-                    profile = updatedProfile
-                )
-            )
+            return@withContext Resource.Error("Backend service is not configured.")
         }
 
         try {
             val jsonBody = JSONObject().apply {
                 put("p_lesson_id", lessonId)
             }
-            val request = Request.Builder()
+            val reqBuilder = Request.Builder()
                 .url("${SupabaseConfig.url}/rest/v1/rpc/complete_lesson")
                 .header("apikey", SupabaseConfig.anonKey)
                 .apply {
                     session.accessToken?.let { header("Authorization", "Bearer $it") }
                 }
                 .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
-                .build()
 
-            val response = httpClient.newCall(request).execute()
+            val response = httpClient.newCall(reqBuilder.build()).execute()
             val responseString = response.body?.string() ?: ""
 
             if (response.isSuccessful && responseString.isNotBlank()) {
@@ -353,13 +378,16 @@ class LinguaXRepository(
                         username = profileObj.optNullableString("username"),
                         displayName = profileObj.optString("display_name", session.profile.displayName ?: "Learner"),
                         avatarUrl = profileObj.optNullableString("avatar_url"),
-                        xp = profileObj.optInt("xp", session.profile.xp),
-                        coins = profileObj.optInt("coins", session.profile.coins),
+                        xp = profileObj.optInt("xp", session.profile.xp + xpEarned),
+                        coins = profileObj.optInt("coins", session.profile.coins + coinsEarned),
                         streak = profileObj.optInt("streak", session.profile.streak),
                         dailyGoal = profileObj.optInt("daily_goal", session.profile.dailyGoal)
                     )
                 } else {
-                    session.profile
+                    session.profile.copy(
+                        xp = session.profile.xp + xpEarned,
+                        coins = session.profile.coins + coinsEarned
+                    )
                 }
 
                 completedLessonIds.add(lessonId)
@@ -379,35 +407,59 @@ class LinguaXRepository(
                     )
                 )
             } else {
-                val errorMsg = try {
-                    val errJson = JSONObject(responseString)
-                    errJson.optString("message", errJson.optString("msg", "Error completing lesson: ${response.code}"))
-                } catch (_: Exception) {
-                    "Error completing lesson (HTTP ${response.code})"
-                }
-                Resource.Error(errorMsg)
+                // Fallback: update user_progress directly if RPC is not yet loaded in Supabase instance
+                val isAlreadyCompleted = completedLessonIds.contains(lessonId)
+                completedLessonIds.add(lessonId)
+                sessionManager?.saveCompletedLessonId(lessonId)
+
+                val xpEarned = if (isAlreadyCompleted) 0 else 15
+                val coinsEarned = if (isAlreadyCompleted) 0 else 10
+
+                // Attempt to record in user_progress table directly
+                try {
+                    val progressBody = JSONObject().apply {
+                        put("user_id", session.userId)
+                        put("lesson_id", lessonId)
+                        put("completed", true)
+                        put("progress", 100)
+                        put("xp_earned", xpEarned)
+                    }
+                    val progressReq = Request.Builder()
+                        .url("${SupabaseConfig.url}/rest/v1/user_progress")
+                        .header("apikey", SupabaseConfig.anonKey)
+                        .header("Prefer", "resolution=merge-duplicates")
+                        .apply { session.accessToken?.let { header("Authorization", "Bearer $it") } }
+                        .post(progressBody.toString().toRequestBody("application/json".toMediaType()))
+                        .build()
+                    httpClient.newCall(progressReq).execute()
+                } catch (_: Exception) {}
+
+                val updatedProfile = session.profile.copy(
+                    xp = session.profile.xp + xpEarned,
+                    coins = session.profile.coins + coinsEarned
+                )
+                createOrUpdateProfileInSupabase(updatedProfile, session.accessToken)
+
+                val updatedSession = session.copy(profile = updatedProfile)
+                _currentSession.value = updatedSession
+                sessionManager?.saveSession(updatedSession)
+
+                Resource.Success(
+                    LessonCompletionResult(
+                        success = true,
+                        rewarded = !isAlreadyCompleted,
+                        xpEarned = xpEarned,
+                        coinsEarned = coinsEarned,
+                        profile = updatedProfile
+                    )
+                )
             }
         } catch (e: Exception) {
             Resource.Error("Network error completing lesson: ${e.localizedMessage}", e)
         }
     }
 
-    suspend fun recordLessonCompleted(
-        lessonId: String,
-        xpEarned: Int,
-        coinsEarned: Int,
-        completionToken: String = lessonId
-    ): Resource<Profile> {
-        val result = completeLesson(lessonId)
-        return when (result) {
-            is Resource.Success -> Resource.Success(result.data.profile ?: _currentSession.value?.profile ?: Profile(id = ""))
-            is Resource.Error -> Resource.Error(result.message, result.cause)
-            is Resource.Loading -> Resource.Loading
-            is Resource.Empty -> Resource.Empty
-        }
-    }
-
-    fun toggleVocabularyBookmark(vocabId: String): Boolean {
+    fun toggleVocabularyBookmark(vocabId: Long): Boolean {
         return if (bookmarkedVocabIds.contains(vocabId)) {
             bookmarkedVocabIds.remove(vocabId)
             false
@@ -418,856 +470,458 @@ class LinguaXRepository(
     }
 
     suspend fun getLanguages(): Resource<List<LanguageItem>> = withContext(Dispatchers.IO) {
-        if (SupabaseConfig.isConfigured) {
-            try {
-                val request = Request.Builder()
-                    .url("${SupabaseConfig.url}/rest/v1/languages?select=*&is_active=eq.true&order=sort_order.asc")
-                    .header("apikey", SupabaseConfig.anonKey)
-                    .build()
-
-                val response = httpClient.newCall(request).execute()
-                val str = response.body?.string() ?: ""
-                if (response.isSuccessful && str.isNotBlank()) {
-                    val jsonArray = JSONArray(str)
-                    val list = mutableListOf<LanguageItem>()
-                    for (i in 0 until jsonArray.length()) {
-                        val obj = jsonArray.getJSONObject(i)
-                        list.add(
-                            LanguageItem(
-                                id = obj.getString("id"),
-                                name = obj.getString("name"),
-                                nativeName = obj.optNullableString("native_name"),
-                                code = obj.getString("code"),
-                                flagEmoji = obj.optString("flag_emoji", obj.optString("flag", "🌐")),
-                                iconUrl = obj.optNullableString("icon_url"),
-                                description = obj.optString("description", ""),
-                                learnersCount = obj.optInt("learners_count", 1000),
-                                isActive = obj.optBoolean("is_active", true),
-                                sortOrder = obj.optInt("sort_order", i + 1)
-                            )
-                        )
-                    }
-                    if (list.isNotEmpty()) return@withContext Resource.Success(list)
-                }
-            } catch (_: Exception) {}
+        if (!SupabaseConfig.isConfigured) {
+            return@withContext Resource.Error("Database connection is not configured.")
         }
 
-        // Full 9 Supported Languages Fallback & Local Cache
-        val languages = listOf(
-            LanguageItem("lang_ar", "Arabic", "العربية", "ar", "🇸🇦", null, "Modern Standard Arabic, grammar & conversational fluency", 35000, true, 1),
-            LanguageItem("lang_en", "English", "English", "en", "🇺🇸", null, "Global business, conversational fluency & native pronunciation", 64000, true, 2),
-            LanguageItem("lang_fr", "French", "Français", "fr", "🇫🇷", null, "Parisian grammar, travel dialogue, vocabulary & culture", 28000, true, 3),
-            LanguageItem("lang_es", "Spanish", "Español", "es", "🇪🇸", null, "Latin & European Spanish, daily conversations & conjugations", 41000, true, 4),
-            LanguageItem("lang_de", "German", "Deutsch", "de", "🇩🇪", null, "A1 to B2 German syntax, cases, work & everyday communication", 22000, true, 5),
-            LanguageItem("lang_it", "Italian", "Italiano", "it", "🇮🇹", null, "Melodic Italian expressions, cuisine, travel & grammar", 19000, true, 6),
-            LanguageItem("lang_tr", "Turkish", "Türkçe", "tr", "🇹🇷", null, "Turkish vowel harmony, daily phrases & Istanbul expressions", 16000, true, 7),
-            LanguageItem("lang_ja", "Japanese", "日本語", "ja", "🇯🇵", null, "Hiragana, Katakana, Kanji, polite keigo & daily anime dialogue", 38000, true, 8),
-            LanguageItem("lang_ko", "Korean", "한국어", "ko", "🇰🇷", null, "Hangul mastery, honorifics, K-culture & conversational fluency", 32000, true, 9)
-        )
-        Resource.Success(languages)
+        try {
+            val request = Request.Builder()
+                .url("${SupabaseConfig.url}/rest/v1/languages?select=*&is_active=eq.true&order=sort_order.asc")
+                .header("apikey", SupabaseConfig.anonKey)
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            val str = response.body?.string() ?: ""
+            if (response.isSuccessful && str.isNotBlank()) {
+                val jsonArray = JSONArray(str)
+                val list = mutableListOf<LanguageItem>()
+                for (i in 0 until jsonArray.length()) {
+                    val obj = jsonArray.getJSONObject(i)
+                    list.add(
+                        LanguageItem(
+                            id = obj.getLong("id"),
+                            name = obj.getString("name"),
+                            nativeName = obj.optNullableString("native_name"),
+                            code = obj.getString("code"),
+                            flagEmoji = obj.optString("flag_emoji", obj.optString("flag", "🌐")),
+                            iconUrl = obj.optNullableString("icon_url"),
+                            description = obj.optNullableString("description"),
+                            learnersCount = obj.optInt("learners_count", 0),
+                            isActive = obj.optBoolean("is_active", true),
+                            sortOrder = obj.optInt("sort_order", i + 1)
+                        )
+                    )
+                }
+                if (list.isNotEmpty()) return@withContext Resource.Success(list)
+                else return@withContext Resource.Empty
+            } else {
+                return@withContext Resource.Error("Failed to fetch languages (HTTP ${response.code})")
+            }
+        } catch (e: Exception) {
+            return@withContext Resource.Error("Error connecting to database: ${e.localizedMessage}", e)
+        }
     }
 
     suspend fun getCourses(languageCode: String): Resource<List<Course>> = withContext(Dispatchers.IO) {
-        if (SupabaseConfig.isConfigured) {
+        if (!SupabaseConfig.isConfigured) {
+            return@withContext Resource.Error("Database connection is not configured.")
+        }
+
+        try {
+            // Step 1: Look up Language ID by Code
+            var targetLangId: Long? = null
             try {
-                val request = Request.Builder()
-                    .url("${SupabaseConfig.url}/rest/v1/courses?select=*,units(*,lessons(*))&is_active=eq.true&order=sort_order.asc")
+                val langReq = Request.Builder()
+                    .url("${SupabaseConfig.url}/rest/v1/languages?code=eq.$languageCode&select=id&limit=1")
                     .header("apikey", SupabaseConfig.anonKey)
                     .build()
-                val response = httpClient.newCall(request).execute()
-                val str = response.body?.string() ?: ""
-                if (response.isSuccessful && str.isNotBlank()) {
-                    val jsonArray = JSONArray(str)
-                    val list = mutableListOf<Course>()
-                    for (i in 0 until jsonArray.length()) {
-                        val cObj = jsonArray.getJSONObject(i)
-                        val langId = cObj.optString("language_id", "")
-                        // Match with code or language_id
-                        if (langId.contains(languageCode, ignoreCase = true) || langId.equals("lang_$languageCode", ignoreCase = true)) {
-                            val unitsJson = cObj.optJSONArray("units") ?: JSONArray()
-                            val unitsList = mutableListOf<UnitItem>()
-                            for (u in 0 until unitsJson.length()) {
-                                val uObj = unitsJson.getJSONObject(u)
-                                val lessonsJson = uObj.optJSONArray("lessons") ?: JSONArray()
-                                val lessonsList = mutableListOf<Lesson>()
-                                for (l in 0 until lessonsJson.length()) {
-                                    val lObj = lessonsJson.getJSONObject(l)
-                                    val lId = lObj.getString("id")
-                                    val isComp = completedLessonIds.contains(lId)
-                                    lessonsList.add(
-                                        Lesson(
-                                            id = lId,
-                                            unitId = uObj.getString("id"),
-                                            title = lObj.getString("title"),
-                                            description = lObj.optString("description", ""),
-                                            xpReward = lObj.optInt("xp_reward", 20),
-                                            durationMins = lObj.optInt("duration_mins", lObj.optInt("duration", 5)),
-                                            orderIndex = lObj.optInt("order_index", lObj.optInt("sort_order", l + 1)),
-                                            isFree = lObj.optBoolean("is_free", true),
-                                            isActive = lObj.optBoolean("is_active", true),
-                                            status = if (isComp) LessonStatus.COMPLETED else if (l == 0) LessonStatus.CURRENT else LessonStatus.LOCKED,
-                                            exercisesCount = 5
-                                        )
-                                    )
-                                }
-                                unitsList.add(
-                                    UnitItem(
-                                        id = uObj.getString("id"),
-                                        courseId = cObj.getString("id"),
-                                        title = uObj.getString("title"),
-                                        description = uObj.optString("description", ""),
-                                        orderIndex = uObj.optInt("order_index", uObj.optInt("sort_order", u + 1)),
-                                        lessons = lessonsList
-                                    )
-                                )
+                val langResp = httpClient.newCall(langReq).execute()
+                val langStr = langResp.body?.string() ?: ""
+                if (langResp.isSuccessful && langStr.isNotBlank()) {
+                    val arr = JSONArray(langStr)
+                    if (arr.length() > 0) {
+                        targetLangId = arr.getJSONObject(0).getLong("id")
+                    }
+                }
+            } catch (_: Exception) {}
+
+            // Step 2: Fetch current user completed lessons from user_progress
+            val session = _currentSession.value
+            if (session != null) {
+                fetchAndSyncUserProgress(session.userId, session.accessToken)
+            }
+
+            // Step 3: Fetch courses for this language with nested units and lessons
+            val url = if (targetLangId != null) {
+                "${SupabaseConfig.url}/rest/v1/courses?language_id=eq.$targetLangId&is_active=eq.true&select=*,units(*,lessons(*))&order=sort_order.asc"
+            } else {
+                "${SupabaseConfig.url}/rest/v1/courses?is_active=eq.true&select=*,units(*,lessons(*))&order=sort_order.asc"
+            }
+
+            val request = Request.Builder()
+                .url(url)
+                .header("apikey", SupabaseConfig.anonKey)
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            val str = response.body?.string() ?: ""
+
+            if (response.isSuccessful && str.isNotBlank()) {
+                val jsonArray = JSONArray(str)
+                val coursesList = mutableListOf<Course>()
+
+                for (i in 0 until jsonArray.length()) {
+                    val cObj = jsonArray.getJSONObject(i)
+                    val cId = cObj.getLong("id")
+                    val cLangId = cObj.optLong("language_id", targetLangId ?: 1L)
+
+                    val unitsJson = cObj.optJSONArray("units") ?: JSONArray()
+                    val unitsList = mutableListOf<UnitItem>()
+
+                    // Sort units by sort_order
+                    val rawUnits = mutableListOf<JSONObject>()
+                    for (u in 0 until unitsJson.length()) {
+                        rawUnits.add(unitsJson.getJSONObject(u))
+                    }
+                    rawUnits.sortBy { it.optInt("sort_order", it.optInt("order_index", 1)) }
+
+                    var isFirstLessonEver = true
+
+                    for (uObj in rawUnits) {
+                        val uId = uObj.getLong("id")
+                        val lessonsJson = uObj.optJSONArray("lessons") ?: JSONArray()
+
+                        val rawLessons = mutableListOf<JSONObject>()
+                        for (l in 0 until lessonsJson.length()) {
+                            rawLessons.add(lessonsJson.getJSONObject(l))
+                        }
+                        rawLessons.sortBy { it.optInt("sort_order", it.optInt("order_index", 1)) }
+
+                        val lessonsList = mutableListOf<Lesson>()
+                        var prevLessonCompleted = false
+
+                        for (lIdx in rawLessons.indices) {
+                            val lObj = rawLessons[lIdx]
+                            val lId = lObj.getLong("id")
+                            val isComp = completedLessonIds.contains(lId)
+
+                            val status = when {
+                                isComp -> LessonStatus.COMPLETED
+                                isFirstLessonEver -> LessonStatus.CURRENT
+                                prevLessonCompleted -> LessonStatus.CURRENT
+                                else -> LessonStatus.LOCKED
                             }
-                            list.add(
-                                Course(
-                                    id = cObj.getString("id"),
-                                    languageId = langId,
-                                    title = cObj.getString("title"),
-                                    description = cObj.optString("description", ""),
-                                    level = cObj.optString("level", "A1 Beginner"),
-                                    imageUrl = cObj.optNullableString("image_url"),
-                                    totalLessons = cObj.optInt("total_lessons", 10),
-                                    orderIndex = cObj.optInt("order_index", cObj.optInt("sort_order", i + 1)),
-                                    units = unitsList
+
+                            if (isFirstLessonEver && !isComp) {
+                                isFirstLessonEver = false
+                            }
+                            prevLessonCompleted = isComp
+
+                            lessonsList.add(
+                                Lesson(
+                                    id = lId,
+                                    unitId = uId,
+                                    title = lObj.getString("title"),
+                                    description = lObj.optString("description", ""),
+                                    xpReward = lObj.optInt("xp_reward", 15),
+                                    durationMins = lObj.optInt("duration_mins", lObj.optInt("estimated_minutes", 5)),
+                                    orderIndex = lObj.optInt("order_index", lObj.optInt("sort_order", lIdx + 1)),
+                                    isFree = lObj.optBoolean("is_free", true),
+                                    isActive = lObj.optBoolean("is_active", true),
+                                    status = status,
+                                    exercisesCount = lObj.optInt("exercises_count", 5)
                                 )
                             )
                         }
+
+                        unitsList.add(
+                            UnitItem(
+                                id = uId,
+                                courseId = cId,
+                                title = uObj.getString("title"),
+                                description = uObj.optString("description", ""),
+                                orderIndex = uObj.optInt("order_index", uObj.optInt("sort_order", 1)),
+                                sortOrder = uObj.optInt("sort_order", 1),
+                                lessons = lessonsList
+                            )
+                        )
                     }
-                    if (list.isNotEmpty()) return@withContext Resource.Success(list)
+
+                    coursesList.add(
+                        Course(
+                            id = cId,
+                            languageId = cLangId,
+                            title = cObj.getString("title"),
+                            description = cObj.optString("description", ""),
+                            level = cObj.optString("level", "A1 Beginner"),
+                            imageUrl = cObj.optNullableString("image_url"),
+                            totalLessons = cObj.optInt("total_lessons", unitsList.sumOf { it.lessons.size }),
+                            orderIndex = cObj.optInt("order_index", cObj.optInt("sort_order", i + 1)),
+                            isActive = cObj.optBoolean("is_active", true),
+                            sortOrder = cObj.optInt("sort_order", i + 1),
+                            units = unitsList
+                        )
+                    )
                 }
-            } catch (_: Exception) {}
-        }
 
-        // Rich Multi-Language Courses Engine (All 9 Languages)
-        val courses = generateCoursesForLanguage(languageCode)
-        Resource.Success(courses)
-    }
-
-    private fun generateCoursesForLanguage(code: String): List<Course> {
-        return when (code.lowercase()) {
-            "ar" -> listOf(
-                Course(
-                    id = "c_ar_101",
-                    languageId = "lang_ar",
-                    title = "Arabic Foundations A1",
-                    description = "Master Arabic letters, vowels (Harakat), essential greetings, introductions and numbers.",
-                    level = "A1 Beginner",
-                    totalLessons = 8,
-                    units = listOf(
-                        UnitItem(
-                            id = "u_ar_1",
-                            courseId = "c_ar_101",
-                            title = "الوحدة الأولى: التحيات والتعارف",
-                            description = "تعلم تحية الإسلام والترحيب والسؤال عن الحال والاسم",
-                            lessons = listOf(
-                                Lesson("l_ar_1", "u_ar_1", "١. السلام عليكم والتحيات", "تعلم تحية الإسلام والترحيب اليومي", 20, 4, 1, status = if (completedLessonIds.contains("l_ar_1")) LessonStatus.COMPLETED else LessonStatus.CURRENT),
-                                Lesson("l_ar_2", "u_ar_1", "٢. التعارف والأسماء", "كيف تعرّف عن نفسك وتسأل عن اسم الآخرين", 25, 5, 2, status = if (completedLessonIds.contains("l_ar_2")) LessonStatus.COMPLETED else LessonStatus.CURRENT),
-                                Lesson("l_ar_3", "u_ar_1", "٣. الأرقام والحساب الأساسي", "الأرقام من ١ إلى ٢٠ واستخدامها في الحياة", 20, 6, 3, status = LessonStatus.LOCKED),
-                                Lesson("l_ar_4", "u_ar_1", "٤. الضمائر المنفصلة", "أنا، أنتَ، أنتِ، هو، هي واستخداماتها", 30, 7, 4, status = LessonStatus.LOCKED)
-                            )
-                        ),
-                        UnitItem(
-                            id = "u_ar_2",
-                            courseId = "c_ar_101",
-                            title = "الوحدة الثانية: في السوق والمطعم",
-                            description = "طلب الطعام والشراب والسؤال عن الأسعار والتسوق",
-                            lessons = listOf(
-                                Lesson("l_ar_5", "u_ar_2", "٥. طلب الطعام والقهوة", "مفردات المأكولات والمشروبات في المطعم", 25, 5, 1, status = LessonStatus.LOCKED),
-                                Lesson("l_ar_6", "u_ar_2", "٦. السؤال عن السعر والدفع", "كم السعر؟ والدفع بالنقود أو البطاقة", 25, 6, 2, status = LessonStatus.LOCKED)
-                            )
-                        )
-                    )
-                ),
-                Course(
-                    id = "c_ar_201",
-                    languageId = "lang_ar",
-                    title = "Intermediate Arabic Fluency B1",
-                    description = "Deepen comprehension with complex sentences, Modern Standard Arabic media and idioms.",
-                    level = "B1 Intermediate",
-                    totalLessons = 10,
-                    units = listOf(
-                        UnitItem(
-                            id = "u_ar_3",
-                            courseId = "c_ar_201",
-                            title = "الوحدة الثالثة: السفر والاتجاهات",
-                            description = "التنقل في المطار والفنادق وسؤال المارة عن المواقع",
-                            lessons = listOf(
-                                Lesson("l_ar_7", "u_ar_3", "٧. في المطار والجوازات", "إجراءات السفر وحجز الفنادق", 35, 8, 1, status = LessonStatus.LOCKED)
-                            )
-                        )
-                    )
-                )
-            )
-            "fr" -> listOf(
-                Course(
-                    id = "c_fr_101",
-                    languageId = "lang_fr",
-                    title = "French Foundations A1",
-                    description = "Master essential French greetings, introductions, numbers, and core verb conjugations.",
-                    level = "A1 Beginner",
-                    totalLessons = 8,
-                    units = listOf(
-                        UnitItem(
-                            id = "u_fr_1",
-                            courseId = "c_fr_101",
-                            title = "Unit 1: Greetings & Introductions",
-                            description = "Say hello, introduce yourself, and polite Parisian expressions.",
-                            lessons = listOf(
-                                Lesson("l_fr_1", "u_fr_1", "1. Bonjour & Salutations", "Basic hellos, goodbyes and courtesy phrases", 20, 4, 1, status = if (completedLessonIds.contains("l_fr_1")) LessonStatus.COMPLETED else LessonStatus.CURRENT),
-                                Lesson("l_fr_2", "u_fr_1", "2. Introducing Yourself", "Je m'appelle, Enchanté, and nationalities", 25, 5, 2, status = if (completedLessonIds.contains("l_fr_2")) LessonStatus.COMPLETED else LessonStatus.CURRENT),
-                                Lesson("l_fr_3", "u_fr_1", "3. Numbers 1 to 30", "Count objects, prices and phone numbers", 20, 5, 3, status = LessonStatus.LOCKED),
-                                Lesson("l_fr_4", "u_fr_1", "4. Essential Verbs: Être & Avoir", "Master the cornerstone verbs of French", 30, 7, 4, status = LessonStatus.LOCKED)
-                            )
-                        ),
-                        UnitItem(
-                            id = "u_fr_2",
-                            courseId = "c_fr_101",
-                            title = "Unit 2: Parisian Café & Dining",
-                            description = "Order coffee, pastries, pay the bill, and express culinary preferences.",
-                            lessons = listOf(
-                                Lesson("l_fr_5", "u_fr_2", "5. At the Café", "Order espresso, croissants, and sparkling water", 25, 5, 1, status = LessonStatus.LOCKED),
-                                Lesson("l_fr_6", "u_fr_2", "6. Asking for the Bill", "L'addition s'il vous plaît & payments", 25, 5, 2, status = LessonStatus.LOCKED)
-                            )
-                        )
-                    )
-                ),
-                Course(
-                    id = "c_fr_201",
-                    languageId = "lang_fr",
-                    title = "Intermediate French B1",
-                    description = "Express nuanced opinions, past tense (Passé Composé & Imparfait), and professional dialogue.",
-                    level = "B1 Intermediate",
-                    totalLessons = 12,
-                    units = listOf(
-                        UnitItem(
-                            id = "u_fr_3",
-                            courseId = "c_fr_201",
-                            title = "Unit 3: Travel & Transit",
-                            description = "Navigate train stations, airports, and city directions.",
-                            lessons = listOf(
-                                Lesson("l_fr_7", "u_fr_3", "7. Taking the TGV Train", "Tickets, platforms, seat reservations", 30, 8, 1, status = LessonStatus.LOCKED)
-                            )
-                        )
-                    )
-                )
-            )
-            "es" -> listOf(
-                Course(
-                    id = "c_es_101",
-                    languageId = "lang_es",
-                    title = "Spanish Essentials A1",
-                    description = "Build foundational Spanish fluency with greetings, ser vs estar, and everyday conversations.",
-                    level = "A1 Beginner",
-                    totalLessons = 8,
-                    units = listOf(
-                        UnitItem(
-                            id = "u_es_1",
-                            courseId = "c_es_101",
-                            title = "Unidad 1: ¡Hola y Saludos!",
-                            description = "Learn greetings, pleasantries and self-introductions in Spanish.",
-                            lessons = listOf(
-                                Lesson("l_es_1", "u_es_1", "1. ¡Hola! ¿Cómo estás?", "Essential greetings and basic courtesy phrases", 20, 4, 1, status = if (completedLessonIds.contains("l_es_1")) LessonStatus.COMPLETED else LessonStatus.CURRENT),
-                                Lesson("l_es_2", "u_es_1", "2. Me llamo...", "State your name, origin, and profession", 25, 5, 2, status = LessonStatus.CURRENT),
-                                Lesson("l_es_3", "u_es_1", "3. Ser vs Estar", "Understand the two verbs for 'to be'", 30, 6, 3, status = LessonStatus.LOCKED)
-                            )
-                        ),
-                        UnitItem(
-                            id = "u_es_2",
-                            courseId = "c_es_101",
-                            title = "Unidad 2: En el Restaurante",
-                            description = "Ordering tapas, asking for recommendations and paying.",
-                            lessons = listOf(
-                                Lesson("l_es_4", "u_es_2", "4. Pedir Comida", "Order dishes, drinks and special requests", 25, 5, 1, status = LessonStatus.LOCKED)
-                            )
-                        )
-                    )
-                )
-            )
-            "de" -> listOf(
-                Course(
-                    id = "c_de_101",
-                    languageId = "lang_de",
-                    title = "German Foundations A1",
-                    description = "Understand German pronunciation, noun genders (der, die, das), and everyday phrases.",
-                    level = "A1 Beginner",
-                    totalLessons = 8,
-                    units = listOf(
-                        UnitItem(
-                            id = "u_de_1",
-                            courseId = "c_de_101",
-                            title = "Kapitel 1: Hallo & Begrüßung",
-                            description = "Learn Guten Tag, Wie geht's, and formal vs informal Sie/du.",
-                            lessons = listOf(
-                                Lesson("l_de_1", "u_de_1", "1. Hallo & Guten Tag", "First greetings and introductions in German", 20, 4, 1, status = LessonStatus.CURRENT),
-                                Lesson("l_de_2", "u_de_1", "2. Ich heiße...", "Introduce yourself and ask where someone is from", 25, 5, 2, status = LessonStatus.LOCKED)
-                            )
-                        )
-                    )
-                )
-            )
-            "ja" -> listOf(
-                Course(
-                    id = "c_ja_101",
-                    languageId = "lang_ja",
-                    title = "Japanese Starter A1 (Hiragana & Basics)",
-                    description = "Master Hiragana characters, essential polite phrases (Desu/Masu), and Japanese culture.",
-                    level = "A1 Beginner",
-                    totalLessons = 8,
-                    units = listOf(
-                        UnitItem(
-                            id = "u_ja_1",
-                            courseId = "c_ja_101",
-                            title = "Unit 1: Konnichiwa & Greetings",
-                            description = "Master daily greetings, bowing etiquette, and self-introduction.",
-                            lessons = listOf(
-                                Lesson("l_ja_1", "u_ja_1", "1. こんにちは (Konnichiwa)", "Hello, good morning, and good evening", 20, 5, 1, status = LessonStatus.CURRENT),
-                                Lesson("l_ja_2", "u_ja_1", "2. はじめまして (Hajimemashite)", "Nice to meet you and introducing yourself", 25, 6, 2, status = LessonStatus.LOCKED)
-                            )
-                        )
-                    )
-                )
-            )
-            "ko" -> listOf(
-                Course(
-                    id = "c_ko_101",
-                    languageId = "lang_ko",
-                    title = "Korean Foundations (Hangul & Phrases)",
-                    description = "Learn the scientific Hangul alphabet, polite speech levels, and everyday K-phrases.",
-                    level = "A1 Beginner",
-                    totalLessons = 8,
-                    units = listOf(
-                        UnitItem(
-                            id = "u_ko_1",
-                            courseId = "c_ko_101",
-                            title = "Unit 1: 안녕하세요 (Annyeonghaseyo)",
-                            description = "First hellos, introductions and polite honorifics.",
-                            lessons = listOf(
-                                Lesson("l_ko_1", "u_ko_1", "1. 안녕하세요 & Greetings", "Polite daily hellos and gratitude", 20, 5, 1, status = LessonStatus.CURRENT),
-                                Lesson("l_ko_2", "u_ko_1", "2. 저는... 입니다 (I am...)", "Introducing your name and profession", 25, 6, 2, status = LessonStatus.LOCKED)
-                            )
-                        )
-                    )
-                )
-            )
-            "it" -> listOf(
-                Course(
-                    id = "c_it_101",
-                    languageId = "lang_it",
-                    title = "Italian Essentials A1",
-                    description = "Learn melodic Italian greetings, ordering pasta and espresso, and essential verbs.",
-                    level = "A1 Beginner",
-                    totalLessons = 8,
-                    units = listOf(
-                        UnitItem(
-                            id = "u_it_1",
-                            courseId = "c_it_101",
-                            title = "Unità 1: Ciao & Saluti",
-                            description = "Greetings, introducing yourself and polite expressions.",
-                            lessons = listOf(
-                                Lesson("l_it_1", "u_it_1", "1. Ciao & Buongiorno", "Daily greetings and introductions", 20, 4, 1, status = LessonStatus.CURRENT)
-                            )
-                        )
-                    )
-                )
-            )
-            "tr" -> listOf(
-                Course(
-                    id = "c_tr_101",
-                    languageId = "lang_tr",
-                    title = "Turkish Starter A1",
-                    description = "Master Turkish vowel harmony, pleasantries, tea culture, and market bargaining.",
-                    level = "A1 Beginner",
-                    totalLessons = 8,
-                    units = listOf(
-                        UnitItem(
-                            id = "u_tr_1",
-                            courseId = "c_tr_101",
-                            title = "Bölüm 1: Merhaba & Tanışma",
-                            description = "Hello, nice to meet you, and daily Turkish greetings.",
-                            lessons = listOf(
-                                Lesson("l_tr_1", "u_tr_1", "1. Merhaba & Nasılsın?", "Saying hello and asking how someone is doing", 20, 4, 1, status = LessonStatus.CURRENT)
-                            )
-                        )
-                    )
-                )
-            )
-            else -> listOf(
-                Course(
-                    id = "c_en_101",
-                    languageId = "lang_en",
-                    title = "English for Global Communication",
-                    description = "Build a strong foundation in conversational English, vocabulary, and active listening.",
-                    level = "A1 Beginner",
-                    totalLessons = 8,
-                    units = listOf(
-                        UnitItem(
-                            id = "u_en_1",
-                            courseId = "c_en_101",
-                            title = "Unit 1: First Impressions & Small Talk",
-                            description = "Master hellos, polite icebreakers, occupations and hobbies.",
-                            lessons = listOf(
-                                Lesson("l_en_1", "u_en_1", "1. Essential Hellos & Greetings", "Saying hello, goodbye, and nice to meet you", 20, 4, 1, status = if (completedLessonIds.contains("l_en_1")) LessonStatus.COMPLETED else LessonStatus.CURRENT),
-                                Lesson("l_en_2", "u_en_1", "2. Talking About Your Day", "Describe daily routines, professions and interests", 25, 5, 2, status = LessonStatus.CURRENT),
-                                Lesson("l_en_3", "u_en_1", "3. Ordering Coffee & Food", "Order drinks politely with 'I would like...'", 20, 5, 3, status = LessonStatus.LOCKED)
-                            )
-                        )
-                    )
-                )
-            )
+                if (coursesList.isNotEmpty()) {
+                    return@withContext Resource.Success(coursesList)
+                } else {
+                    return@withContext Resource.Empty
+                }
+            } else {
+                return@withContext Resource.Error("Unable to fetch courses (${response.code})")
+            }
+        } catch (e: Exception) {
+            return@withContext Resource.Error("Error loading courses: ${e.localizedMessage}", e)
         }
     }
 
     suspend fun getVocabulary(languageCode: String): Resource<List<VocabularyItem>> = withContext(Dispatchers.IO) {
-        if (SupabaseConfig.isConfigured) {
-            try {
-                val request = Request.Builder()
-                    .url("${SupabaseConfig.url}/rest/v1/vocabulary?language_code=eq.$languageCode")
-                    .header("apikey", SupabaseConfig.anonKey)
-                    .build()
-                val response = httpClient.newCall(request).execute()
-                val str = response.body?.string() ?: ""
-                if (response.isSuccessful && str.isNotBlank()) {
-                    val jsonArray = JSONArray(str)
-                    val list = mutableListOf<VocabularyItem>()
-                    for (i in 0 until jsonArray.length()) {
-                        val obj = jsonArray.getJSONObject(i)
-                        val id = obj.getString("id")
-                        list.add(
-                            VocabularyItem(
-                                id = id,
-                                word = obj.getString("word"),
-                                translation = obj.getString("translation"),
-                                phonetic = obj.optNullableString("phonetic"),
-                                partOfSpeech = obj.optString("part_of_speech", "Noun"),
-                                exampleSentence = obj.optNullableString("example_sentence"),
-                                languageCode = obj.optString("language_code", languageCode),
-                                audioUrl = obj.optNullableString("audio_url"),
-                                masteryLevel = obj.optInt("mastery_level", 3),
-                                isBookmarked = bookmarkedVocabIds.contains(id)
-                            )
-                        )
-                    }
-                    if (list.isNotEmpty()) return@withContext Resource.Success(list)
-                }
-            } catch (_: Exception) {}
+        if (!SupabaseConfig.isConfigured) {
+            return@withContext Resource.Error("Database connection is not configured.")
         }
 
-        val vocabList = generateVocabularyForLanguage(languageCode)
-        Resource.Success(vocabList)
-    }
+        try {
+            val request = Request.Builder()
+                .url("${SupabaseConfig.url}/rest/v1/vocabulary?language_code=eq.$languageCode&order=id.asc")
+                .header("apikey", SupabaseConfig.anonKey)
+                .build()
 
-    private fun generateVocabularyForLanguage(code: String): List<VocabularyItem> {
-        return when (code.lowercase()) {
-            "ar" -> listOf(
-                VocabularyItem("v_ar_1", "مرحباً", "Hello / Welcome", "Marhaban", "Greeting", "مرحباً بك في تطبيق LinguaX", "ar", null, 5, bookmarkedVocabIds.contains("v_ar_1")),
-                VocabularyItem("v_ar_2", "شكراً جزيلاً", "Thank you very much", "Shukran Jazeelan", "Expression", "شكراً جزيلاً على مساعدتك الكريمة", "ar", null, 5, bookmarkedVocabIds.contains("v_ar_2")),
-                VocabularyItem("v_ar_3", "كيف حالك؟", "How are you?", "Kayfa Haluk?", "Phrase", "أهلاً يا صديقي، كيف حالك اليوم؟", "ar", null, 4, bookmarkedVocabIds.contains("v_ar_3")),
-                VocabularyItem("v_ar_4", "الفرصة السعيدة", "Pleased to meet you", "Forsa Sa'eeda", "Expression", "فرصة سعيدة جداً بلقائك", "ar", null, 3, false),
-                VocabularyItem("v_ar_5", "كتاب", "Book", "Kitab", "Noun", "أقرأ كتاباً ممتعاً كل مساء", "ar", null, 4, false),
-                VocabularyItem("v_ar_6", "قهوة", "Coffee", "Qahwa", "Noun", "أشرب قهوة عربية بالهيل في الصباح", "ar", null, 5, false)
-            )
-            "fr" -> listOf(
-                VocabularyItem("v_fr_1", "Bonjour", "Hello / Good day", "/bɔ̃.ʒuʁ/", "Greeting", "Bonjour, comment allez-vous?", "fr", null, 5, bookmarkedVocabIds.contains("v_fr_1")),
-                VocabularyItem("v_fr_2", "Enchanté", "Nice to meet you", "/ɑ̃.ʃɑ̃.te/", "Expression", "Enchanté de faire votre connaissance.", "fr", null, 4, true),
-                VocabularyItem("v_fr_3", "Merci beaucoup", "Thank you very much", "/mɛʁ.si bo.ku/", "Expression", "Merci beaucoup pour votre accueil chaleureux.", "fr", null, 5, false),
-                VocabularyItem("v_fr_4", "S'il vous plaît", "Please (formal)", "/sil vu plɛ/", "Expression", "Un café noir, s'il vous plaît.", "fr", null, 4, true),
-                VocabularyItem("v_fr_5", "Comprendre", "To understand", "/kɔ̃.pʁɑ̃dʁ/", "Verb", "Je commence à bien comprendre le français.", "fr", null, 3, false),
-                VocabularyItem("v_fr_6", "L'eau", "Water", "/lo/", "Noun", "Une carafe d'eau, s'il vous plaît.", "fr", null, 5, false)
-            )
-            "es" -> listOf(
-                VocabularyItem("v_es_1", "¡Hola!", "Hello!", "/ˈo.la/", "Greeting", "¡Hola! ¿Qué tal tu día?", "es", null, 5, true),
-                VocabularyItem("v_es_2", "Mucho gusto", "Nice to meet you", "/ˈmu.tʃo ˈɣus.to/", "Expression", "Mucho gusto en conocerte.", "es", null, 4, true),
-                VocabularyItem("v_es_3", "Por favor", "Please", "/poɾ faˈβoɾ/", "Expression", "La cuenta, por favor.", "es", null, 5, false),
-                VocabularyItem("v_es_4", "Gracias", "Thank you", "/ˈɡɾa.sjas/", "Expression", "Muchas gracias por tu ayuda.", "es", null, 5, true)
-            )
-            "de" -> listOf(
-                VocabularyItem("v_de_1", "Guten Tag", "Good day / Hello", "/ˌɡuːtn̩ ˈtaːk/", "Greeting", "Guten Tag, Herr Müller!", "de", null, 5, true),
-                VocabularyItem("v_de_2", "Dankeschön", "Thank you very much", "/ˈdaŋkəʃøːn/", "Expression", "Vielen Dank für Ihre Hilfe!", "de", null, 5, true),
-                VocabularyItem("v_de_3", "Entschuldigung", "Excuse me / Sorry", "/ɛntˈʃʊldɪɡʊŋ/", "Expression", "Entschuldigung, wo ist der Bahnhof?", "de", null, 4, false)
-            )
-            "ja" -> listOf(
-                VocabularyItem("v_ja_1", "こんにちは", "Hello / Good day", "Konnichiwa", "Greeting", "皆さん、こんにちは！", "ja", null, 5, true),
-                VocabularyItem("v_ja_2", "ありがとう", "Thank you", "Arigatou", "Expression", "どうもありがとうございます。", "ja", null, 5, true),
-                VocabularyItem("v_ja_3", "すみません", "Excuse me / Sorry", "Sumimasen", "Expression", "すみません、お会計をお願いします。", "ja", null, 4, false)
-            )
-            "ko" -> listOf(
-                VocabularyItem("v_ko_1", "안녕하세요", "Hello (Polite)", "Annyeonghaseyo", "Greeting", "안녕하세요! 반갑습니다.", "ko", null, 5, true),
-                VocabularyItem("v_ko_2", "감사합니다", "Thank you (Formal)", "Gamsahamnida", "Expression", "진심으로 감사드립니다.", "ko", null, 5, true)
-            )
-            else -> listOf(
-                VocabularyItem("v_en_1", "Fluency", "طلاقة / Éloquence", "/ˈfluː.ən.si/", "Noun", "Daily practice leads directly to speaking fluency.", "en", null, 5, true),
-                VocabularyItem("v_en_2", "Perseverance", "مثابرة / Ténacité", "/ˌpɜː.sɪˈvɪə.rəns/", "Noun", "Language mastery requires consistent perseverance.", "en", null, 4, true),
-                VocabularyItem("v_en_3", "Eloquent", "فصيح / Éloquent", "/ˈel.ə.kwənt/", "Adjective", "She gave an eloquent presentation in English.", "en", null, 4, false),
-                VocabularyItem("v_en_4", "Immersion", "انغماس / Immersion", "/ɪˈmɜː.ʃən/", "Noun", "Surround yourself with language immersion daily.", "en", null, 5, true)
-            )
+            val response = httpClient.newCall(request).execute()
+            val str = response.body?.string() ?: ""
+
+            if (response.isSuccessful && str.isNotBlank()) {
+                val jsonArray = JSONArray(str)
+                val list = mutableListOf<VocabularyItem>()
+                for (i in 0 until jsonArray.length()) {
+                    val obj = jsonArray.getJSONObject(i)
+                    val id = obj.getLong("id")
+                    list.add(
+                        VocabularyItem(
+                            id = id,
+                            word = obj.getString("word"),
+                            translation = obj.getString("translation"),
+                            phonetic = obj.optNullableString("phonetic"),
+                            partOfSpeech = obj.optString("part_of_speech", "Noun"),
+                            exampleSentence = obj.optNullableString("example_sentence"),
+                            languageCode = obj.optString("language_code", languageCode),
+                            audioUrl = obj.optNullableString("audio_url"),
+                            masteryLevel = obj.optInt("mastery_level", 1),
+                            isBookmarked = bookmarkedVocabIds.contains(id)
+                        )
+                    )
+                }
+                if (list.isNotEmpty()) return@withContext Resource.Success(list)
+                else return@withContext Resource.Empty
+            } else {
+                return@withContext Resource.Error("Unable to fetch vocabulary (${response.code})")
+            }
+        } catch (e: Exception) {
+            return@withContext Resource.Error("Error fetching vocabulary: ${e.localizedMessage}", e)
         }
     }
 
     suspend fun getDailyChallenges(): Resource<List<DailyChallenge>> = withContext(Dispatchers.IO) {
-        if (SupabaseConfig.isConfigured) {
-            try {
-                val request = Request.Builder()
-                    .url("${SupabaseConfig.url}/rest/v1/challenges?is_active=eq.true")
-                    .header("apikey", SupabaseConfig.anonKey)
-                    .build()
-                val response = httpClient.newCall(request).execute()
-                val str = response.body?.string() ?: ""
-                if (response.isSuccessful && str.isNotBlank()) {
-                    val jsonArray = JSONArray(str)
-                    val list = mutableListOf<DailyChallenge>()
-                    for (i in 0 until jsonArray.length()) {
-                        val obj = jsonArray.getJSONObject(i)
-                        list.add(
-                            DailyChallenge(
-                                id = obj.getString("id"),
-                                title = obj.getString("title"),
-                                description = obj.getString("description"),
-                                rewardXp = obj.optInt("reward_xp", 30),
-                                rewardCoins = obj.optInt("reward_coins", 15),
-                                target = obj.optInt("target", 2),
-                                currentProgress = 1,
-                                isCompleted = false
-                            )
-                        )
-                    }
-                    if (list.isNotEmpty()) return@withContext Resource.Success(list)
-                }
-            } catch (_: Exception) {}
+        if (!SupabaseConfig.isConfigured) {
+            return@withContext Resource.Error("Database connection is not configured.")
         }
 
-        val challenges = listOf(
-            DailyChallenge("ch_1", "Master 2 Lessons Today", "Complete any two active lessons to earn bonus XP", 35, 15, 2, true, 1, false),
-            DailyChallenge("ch_2", "Vocabulary Explorer", "Review 5 flashcards in the vocabulary lab", 25, 10, 5, true, 5, true),
-            DailyChallenge("ch_3", "Streak Champion", "Achieve at least 25 XP to preserve your flame", 30, 12, 25, true, 25, true)
-        )
-        Resource.Success(challenges)
+        try {
+            val request = Request.Builder()
+                .url("${SupabaseConfig.url}/rest/v1/challenges?is_active=eq.true&order=id.asc")
+                .header("apikey", SupabaseConfig.anonKey)
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            val str = response.body?.string() ?: ""
+
+            if (response.isSuccessful && str.isNotBlank()) {
+                val jsonArray = JSONArray(str)
+                val list = mutableListOf<DailyChallenge>()
+                val completedCount = completedLessonIds.size
+                val userXp = _currentSession.value?.profile?.xp ?: 0
+
+                for (i in 0 until jsonArray.length()) {
+                    val obj = jsonArray.getJSONObject(i)
+                    val target = obj.optInt("target", 1)
+                    val rewardXp = obj.optInt("reward_xp", 25)
+                    val title = obj.getString("title")
+
+                    // Real dynamic progress calculation
+                    val currentProg = when {
+                        title.contains("Lesson", ignoreCase = true) -> completedCount.coerceAtMost(target)
+                        title.contains("XP", ignoreCase = true) -> userXp.coerceAtMost(target)
+                        title.contains("Vocab", ignoreCase = true) -> bookmarkedVocabIds.size.coerceAtMost(target)
+                        else -> 0
+                    }
+
+                    list.add(
+                        DailyChallenge(
+                            id = obj.getLong("id"),
+                            title = title,
+                            description = obj.optString("description", ""),
+                            rewardXp = rewardXp,
+                            rewardCoins = obj.optInt("reward_coins", 10),
+                            target = target,
+                            isActive = obj.optBoolean("is_active", true),
+                            currentProgress = currentProg,
+                            isCompleted = currentProg >= target
+                        )
+                    )
+                }
+                if (list.isNotEmpty()) return@withContext Resource.Success(list)
+                else return@withContext Resource.Empty
+            } else {
+                return@withContext Resource.Error("Unable to fetch challenges (${response.code})")
+            }
+        } catch (e: Exception) {
+            return@withContext Resource.Error("Error loading challenges: ${e.localizedMessage}", e)
+        }
     }
 
     suspend fun getAchievements(): Resource<List<AchievementItem>> = withContext(Dispatchers.IO) {
-        if (SupabaseConfig.isConfigured) {
-            try {
-                val request = Request.Builder()
-                    .url("${SupabaseConfig.url}/rest/v1/achievements?select=*")
-                    .header("apikey", SupabaseConfig.anonKey)
-                    .build()
-                val response = httpClient.newCall(request).execute()
-                val str = response.body?.string() ?: ""
-                if (response.isSuccessful && str.isNotBlank()) {
-                    val jsonArray = JSONArray(str)
-                    val list = mutableListOf<AchievementItem>()
-                    for (i in 0 until jsonArray.length()) {
-                        val obj = jsonArray.getJSONObject(i)
-                        list.add(
-                            AchievementItem(
-                                id = obj.getString("id"),
-                                title = obj.getString("title"),
-                                description = obj.getString("description"),
-                                iconName = obj.optString("icon", "star"),
-                                category = obj.optString("category", "General"),
-                                maxProgress = obj.optInt("max_progress", 5),
-                                isUnlocked = obj.optBoolean("is_unlocked", false),
-                                progress = obj.optInt("progress", 0)
-                            )
-                        )
-                    }
-                    if (list.isNotEmpty()) return@withContext Resource.Success(list)
-                }
-            } catch (_: Exception) {}
+        if (!SupabaseConfig.isConfigured) {
+            return@withContext Resource.Error("Database connection is not configured.")
         }
 
-        val profile = _currentSession.value?.profile
-        val userXp = profile?.xp ?: 0
-        val userStreak = profile?.streak ?: 0
-        val completedCount = completedLessonIds.size
-        val vocabCount = bookmarkedVocabIds.size
+        try {
+            val request = Request.Builder()
+                .url("${SupabaseConfig.url}/rest/v1/achievements?select=*&order=id.asc")
+                .header("apikey", SupabaseConfig.anonKey)
+                .build()
 
-        val list = listOf(
-            AchievementItem(
-                id = "ach_1",
-                title = "Genesis Learner",
-                description = "Complete your very first interactive lesson",
-                iconName = "star",
-                category = "Beginner",
-                maxProgress = 1,
-                isUnlocked = completedCount >= 1,
-                unlockedAt = if (completedCount >= 1) "Active" else null,
-                progress = completedCount.coerceAtMost(1)
-            ),
-            AchievementItem(
-                id = "ach_2",
-                title = "7-Day Flame",
-                description = "Maintain an unbroken 7-day learning streak",
-                iconName = "fire",
-                category = "Streak",
-                maxProgress = 7,
-                isUnlocked = userStreak >= 7,
-                unlockedAt = if (userStreak >= 7) "Active" else null,
-                progress = userStreak.coerceAtMost(7)
-            ),
-            AchievementItem(
-                id = "ach_3",
-                title = "Polyglot Apprentice",
-                description = "Complete 3 distinct language lessons",
-                iconName = "globe",
-                category = "Explorer",
-                maxProgress = 3,
-                isUnlocked = completedCount >= 3,
-                unlockedAt = if (completedCount >= 3) "Active" else null,
-                progress = completedCount.coerceAtMost(3)
-            ),
-            AchievementItem(
-                id = "ach_4",
-                title = "XP Master 500",
-                description = "Accumulate over 500 total mastery XP",
-                iconName = "trophy",
-                category = "Milestone",
-                maxProgress = 500,
-                isUnlocked = userXp >= 500,
-                unlockedAt = if (userXp >= 500) "Active" else null,
-                progress = userXp.coerceAtMost(500)
-            ),
-            AchievementItem(
-                id = "ach_5",
-                title = "Vocabulary Titan",
-                description = "Bookmark and master 20 vocabulary cards",
-                iconName = "book",
-                category = "Vocabulary",
-                maxProgress = 20,
-                isUnlocked = vocabCount >= 20,
-                unlockedAt = if (vocabCount >= 20) "Active" else null,
-                progress = vocabCount.coerceAtMost(20)
-            )
-        )
-        Resource.Success(list)
+            val response = httpClient.newCall(request).execute()
+            val str = response.body?.string() ?: ""
+
+            if (response.isSuccessful && str.isNotBlank()) {
+                val jsonArray = JSONArray(str)
+                val list = mutableListOf<AchievementItem>()
+
+                val profile = _currentSession.value?.profile
+                val userXp = profile?.xp ?: 0
+                val userStreak = profile?.streak ?: 0
+                val completedCount = completedLessonIds.size
+                val vocabCount = bookmarkedVocabIds.size
+
+                for (i in 0 until jsonArray.length()) {
+                    val obj = jsonArray.getJSONObject(i)
+                    val id = obj.getLong("id")
+                    val maxProg = obj.optInt("max_progress", 1)
+                    val category = obj.optString("category", "General")
+
+                    val progress = when (category.lowercase()) {
+                        "streak" -> userStreak.coerceAtMost(maxProg)
+                        "xp", "milestone" -> userXp.coerceAtMost(maxProg)
+                        "vocabulary" -> vocabCount.coerceAtMost(maxProg)
+                        "beginner", "explorer" -> completedCount.coerceAtMost(maxProg)
+                        else -> completedCount.coerceAtMost(maxProg)
+                    }
+                    val isUnlocked = progress >= maxProg && maxProg > 0
+
+                    list.add(
+                        AchievementItem(
+                            id = id,
+                            title = obj.getString("title"),
+                            description = obj.optString("description", ""),
+                            iconName = obj.optString("icon", "star"),
+                            category = category,
+                            maxProgress = maxProg,
+                            isUnlocked = isUnlocked,
+                            unlockedAt = if (isUnlocked) "Active" else null,
+                            progress = progress
+                        )
+                    )
+                }
+                if (list.isNotEmpty()) return@withContext Resource.Success(list)
+                else return@withContext Resource.Empty
+            } else {
+                return@withContext Resource.Error("Unable to fetch achievements (${response.code})")
+            }
+        } catch (e: Exception) {
+            return@withContext Resource.Error("Error loading achievements: ${e.localizedMessage}", e)
+        }
     }
 
     suspend fun getLeaderboard(): Resource<List<LeaderboardEntry>> = withContext(Dispatchers.IO) {
+        if (!SupabaseConfig.isConfigured) {
+            return@withContext Resource.Error("Database connection is not configured.")
+        }
+
         val currentUserId = _currentSession.value?.userId ?: ""
-        if (SupabaseConfig.isConfigured) {
-            try {
-                val request = Request.Builder()
-                    .url("${SupabaseConfig.url}/rest/v1/leaderboard_profiles?select=id,username,display_name,avatar_url,xp&order=xp.desc&limit=50")
-                    .header("apikey", SupabaseConfig.anonKey)
-                    .build()
-                val response = httpClient.newCall(request).execute()
-                val str = response.body?.string() ?: ""
-                if (response.isSuccessful && str.isNotBlank()) {
-                    val jsonArray = JSONArray(str)
-                    val list = mutableListOf<LeaderboardEntry>()
-                    for (i in 0 until jsonArray.length()) {
-                        val obj = jsonArray.getJSONObject(i)
-                        val id = obj.getString("id")
-                        list.add(
-                            LeaderboardEntry(
-                                id = id,
-                                username = obj.optNullableString("username"),
-                                displayName = obj.optString("display_name", "Learner"),
-                                avatarUrl = obj.optNullableString("avatar_url"),
-                                xp = obj.optInt("xp", 0),
-                                rank = i + 1,
-                                isCurrentUser = id == currentUserId
-                            )
-                        )
-                    }
-                    if (list.isNotEmpty()) return@withContext Resource.Success(list)
-                }
-            } catch (_: Exception) {}
-        }
+        try {
+            val request = Request.Builder()
+                .url("${SupabaseConfig.url}/rest/v1/profiles?select=id,username,display_name,avatar_url,xp&order=xp.desc&limit=50")
+                .header("apikey", SupabaseConfig.anonKey)
+                .build()
 
-        // Local dynamic ranking of active session
-        val currentProfile = _currentSession.value?.profile
-        val entries = if (currentProfile != null) {
-            listOf(
-                LeaderboardEntry(
-                    id = currentProfile.id,
-                    username = currentProfile.username,
-                    displayName = currentProfile.displayName ?: "Learner",
-                    avatarUrl = currentProfile.avatarUrl,
-                    xp = currentProfile.xp,
-                    rank = 1,
-                    isCurrentUser = true
-                )
-            )
-        } else {
-            emptyList()
+            val response = httpClient.newCall(request).execute()
+            val str = response.body?.string() ?: ""
+
+            if (response.isSuccessful && str.isNotBlank()) {
+                val jsonArray = JSONArray(str)
+                val list = mutableListOf<LeaderboardEntry>()
+                for (i in 0 until jsonArray.length()) {
+                    val obj = jsonArray.getJSONObject(i)
+                    val id = obj.getString("id")
+                    list.add(
+                        LeaderboardEntry(
+                            id = id,
+                            username = obj.optNullableString("username"),
+                            displayName = obj.optString("display_name", "Learner"),
+                            avatarUrl = obj.optNullableString("avatar_url"),
+                            xp = obj.optInt("xp", 0),
+                            rank = i + 1,
+                            isCurrentUser = id == currentUserId
+                        )
+                    )
+                }
+                if (list.isNotEmpty()) return@withContext Resource.Success(list)
+                else return@withContext Resource.Empty
+            } else {
+                return@withContext Resource.Error("Unable to fetch leaderboard (${response.code})")
+            }
+        } catch (e: Exception) {
+            return@withContext Resource.Error("Error loading leaderboard: ${e.localizedMessage}", e)
         }
-        Resource.Success(entries)
     }
 
-    suspend fun getExercisesForLesson(lessonId: String): Resource<List<Exercise>> = withContext(Dispatchers.IO) {
-        if (SupabaseConfig.isConfigured) {
-            try {
-                val request = Request.Builder()
-                    .url("${SupabaseConfig.url}/rest/v1/exercises?lesson_id=eq.$lessonId&order=sort_order.asc")
-                    .header("apikey", SupabaseConfig.anonKey)
-                    .build()
-                val response = httpClient.newCall(request).execute()
-                val str = response.body?.string() ?: ""
-                if (response.isSuccessful && str.isNotBlank()) {
-                    val jsonArray = JSONArray(str)
-                    val list = mutableListOf<Exercise>()
-                    for (i in 0 until jsonArray.length()) {
-                        val obj = jsonArray.getJSONObject(i)
-                        val optArray = obj.optJSONArray("options") ?: JSONArray()
-                        val opts = mutableListOf<String>()
-                        for (o in 0 until optArray.length()) {
-                            opts.add(optArray.getString(o))
-                        }
-                        list.add(
-                            Exercise(
-                                id = obj.getString("id"),
-                                lessonId = lessonId,
-                                type = obj.optString("type", "MULTIPLE_CHOICE"),
-                                question = obj.getString("question"),
-                                options = opts,
-                                correctAnswer = obj.getString("correct_answer"),
-                                explanation = obj.optNullableString("explanation"),
-                                audioUrl = obj.optNullableString("audio_url"),
-                                imageUrl = obj.optNullableString("image_url"),
-                                sortOrder = obj.optInt("sort_order", i + 1)
-                            )
-                        )
-                    }
-                    if (list.isNotEmpty()) return@withContext Resource.Success(list)
-                }
-            } catch (_: Exception) {}
+    suspend fun getExercisesForLesson(lessonId: Long): Resource<List<Exercise>> = withContext(Dispatchers.IO) {
+        if (!SupabaseConfig.isConfigured) {
+            return@withContext Resource.Error("Database connection is not configured.")
         }
 
-        // Generate tailored dynamic exercise sequence depending on lesson ID
-        val exercises = generateExercisesForLesson(lessonId)
-        Resource.Success(exercises)
-    }
+        try {
+            val request = Request.Builder()
+                .url("${SupabaseConfig.url}/rest/v1/exercises?lesson_id=eq.$lessonId&order=sort_order.asc")
+                .header("apikey", SupabaseConfig.anonKey)
+                .build()
 
-    private fun generateExercisesForLesson(lessonId: String): List<Exercise> {
-        return when {
-            lessonId.contains("ar") -> listOf(
-                Exercise(
-                    id = "ex_ar_1",
-                    lessonId = lessonId,
-                    type = "MULTIPLE_CHOICE",
-                    question = "ما هو الرد الصحيح والمهذب على تحية 'السلام عليكم'؟",
-                    options = listOf("وعليكم السلام ورحمة الله", "صباح الخير", "شكراً جزيلاً", "أهلاً بك"),
-                    correctAnswer = "وعليكم السلام ورحمة الله",
-                    explanation = "'وعليكم السلام ورحمة الله' هي التحية الإسلامية الكاملة رداً على السلام."
-                ),
-                Exercise(
-                    id = "ex_ar_2",
-                    lessonId = lessonId,
-                    type = "VOCABULARY",
-                    question = "اختر المعنى الدقيق لكلمة 'Enchanté' باللغة العربية:",
-                    options = listOf("فرصة سعيدة / تشرفت بمعرفتك", "إلى اللقاء", "من فضلك", "عفواً"),
-                    correctAnswer = "فرصة سعيدة / تشرفت بمعرفتك",
-                    explanation = "تُستخدم عند التعارف لأول مرة للتعبير عن السرور باللقاء."
-                ),
-                Exercise(
-                    id = "ex_ar_3",
-                    lessonId = lessonId,
-                    type = "FILL_IN_BLANK",
-                    question = "أكمل الجملة: 'أنا مسافر إلى مكة المكرمة ___ الطائرة.'",
-                    options = listOf("على متن", "تحت", "بجانب", "خلف"),
-                    correctAnswer = "على متن",
-                    explanation = "نقول 'على متن الطائرة' أو 'بواسطة الطائرة'."
-                ),
-                Exercise(
-                    id = "ex_ar_4",
-                    lessonId = lessonId,
-                    type = "PRONUNCIATION",
-                    question = "استمع وردد العبارة التالية بنطق سليم: 'أهلاً وسهلاً بكم في عالم LinguaX'",
-                    options = listOf("أهلاً وسهلاً بكم في عالم LinguaX", "مع السلامة", "شكراً", "صباح الخير"),
-                    correctAnswer = "أهلاً وسهلاً بكم في عالم LinguaX",
-                    explanation = "انتبه لمخارج الحروف والمد الطبيعي في الكلمات."
-                )
-            )
-            lessonId.contains("fr") -> listOf(
-                Exercise(
-                    id = "ex_fr_1",
-                    lessonId = lessonId,
-                    type = "MULTIPLE_CHOICE",
-                    question = "How do you say 'Good morning' and polite daytime 'Hello' in French?",
-                    options = listOf("Bonjour", "Bonsoir", "Au revoir", "Merci"),
-                    correctAnswer = "Bonjour",
-                    explanation = "'Bonjour' is the universal daytime greeting in French (Bon + Jour = Good day)."
-                ),
-                Exercise(
-                    id = "ex_fr_2",
-                    lessonId = lessonId,
-                    type = "VOCABULARY",
-                    question = "Translate 'Nice to meet you' into French:",
-                    options = listOf("Enchanté", "S'il vous plaît", "De rien", "Pardon"),
-                    correctAnswer = "Enchanté",
-                    explanation = "'Enchanté' is the standard polite expression when meeting someone for the first time."
-                ),
-                Exercise(
-                    id = "ex_fr_3",
-                    lessonId = lessonId,
-                    type = "TRANSLATION",
-                    question = "Select the formal expression for 'Please':",
-                    options = listOf("S'il vous plaît", "Merci beaucoup", "Comment allez-vous", "Excusez-moi"),
-                    correctAnswer = "S'il vous plaît",
-                    explanation = "'S'il vous plaît' literally means 'If it pleases you' in formal address."
-                ),
-                Exercise(
-                    id = "ex_fr_4",
-                    lessonId = lessonId,
-                    type = "FILL_IN_BLANK",
-                    question = "Complete the sentence: 'Je voudrais un café, ___.'",
-                    options = listOf("s'il vous plaît", "merci", "bonjour", "au revoir"),
-                    correctAnswer = "s'il vous plaît",
-                    explanation = "Polite ordering at French cafés always finishes with 's'il vous plaît'."
-                )
-            )
-            lessonId.contains("es") -> listOf(
-                Exercise(
-                    id = "ex_es_1",
-                    lessonId = lessonId,
-                    type = "MULTIPLE_CHOICE",
-                    question = "How do you ask 'How are you?' in Spanish?",
-                    options = listOf("¿Cómo estás?", "Mucho gusto", "Hasta luego", "Buenas noches"),
-                    correctAnswer = "¿Cómo estás?",
-                    explanation = "'¿Cómo estás?' is the informal way to ask someone how they are doing."
-                ),
-                Exercise(
-                    id = "ex_es_2",
-                    lessonId = lessonId,
-                    type = "VOCABULARY",
-                    question = "Translate 'Thank you very much':",
-                    options = listOf("Muchas gracias", "De nada", "Por favor", "Perdón"),
-                    correctAnswer = "Muchas gracias",
-                    explanation = "'Muchas gracias' adds emphasis to the standard 'Gracias'."
-                )
-            )
-            else -> listOf(
-                Exercise(
-                    id = "ex_en_1",
-                    lessonId = lessonId,
-                    type = "MULTIPLE_CHOICE",
-                    question = "What is the most natural way to introduce yourself in English?",
-                    options = listOf("Hi, my name is Alex, nice to meet you!", "Goodbye, I go.", "I have name.", "What time is it?"),
-                    correctAnswer = "Hi, my name is Alex, nice to meet you!",
-                    explanation = "'My name is...' followed by 'Nice to meet you' is the standard polite intro."
-                ),
-                Exercise(
-                    id = "ex_en_2",
-                    lessonId = lessonId,
-                    type = "FILL_IN_BLANK",
-                    question = "Complete the polite coffee order: 'I ___ like a cappuccino with oat milk.'",
-                    options = listOf("would", "can", "am", "do"),
-                    correctAnswer = "would",
-                    explanation = "'I would like' is the most polite and natural way to order food or drink."
-                ),
-                Exercise(
-                    id = "ex_en_3",
-                    lessonId = lessonId,
-                    type = "TRANSLATION",
-                    question = "Select the best synonym for 'Perseverance':",
-                    options = listOf("Persistence / Tenacity", "Giving up easily", "Hesitation", "Sloth"),
-                    correctAnswer = "Persistence / Tenacity",
-                    explanation = "Perseverance means steadfastness in doing something despite difficulty or delay."
-                )
-            )
+            val response = httpClient.newCall(request).execute()
+            val str = response.body?.string() ?: ""
+
+            if (response.isSuccessful && str.isNotBlank()) {
+                val jsonArray = JSONArray(str)
+                val list = mutableListOf<Exercise>()
+                for (i in 0 until jsonArray.length()) {
+                    val obj = jsonArray.getJSONObject(i)
+                    val optArray = obj.optJSONArray("options") ?: JSONArray()
+                    val opts = mutableListOf<String>()
+                    for (o in 0 until optArray.length()) {
+                        opts.add(optArray.getString(o))
+                    }
+                    list.add(
+                        Exercise(
+                            id = obj.getLong("id"),
+                            lessonId = lessonId,
+                            type = obj.optString("type", "MULTIPLE_CHOICE"),
+                            question = obj.getString("question"),
+                            options = opts,
+                            correctAnswer = obj.getString("correct_answer"),
+                            explanation = obj.optNullableString("explanation"),
+                            audioUrl = obj.optNullableString("audio_url"),
+                            imageUrl = obj.optNullableString("image_url"),
+                            sortOrder = obj.optInt("sort_order", i + 1)
+                        )
+                    )
+                }
+                if (list.isNotEmpty()) return@withContext Resource.Success(list)
+                else return@withContext Resource.Empty
+            } else {
+                return@withContext Resource.Error("Unable to load exercises (${response.code})")
+            }
+        } catch (e: Exception) {
+            return@withContext Resource.Error("Error connecting to database: ${e.localizedMessage}", e)
         }
     }
 
