@@ -17,13 +17,42 @@ jobs:
     steps:
 
       # ==========================================
-      # 1. Checkout
+      # 1. Checkout repository
       # ==========================================
       - name: Checkout Repository
         uses: actions/checkout@v4
 
       # ==========================================
-      # 2. Java 17
+      # 2. Remove broken Gradle Wrapper
+      # ==========================================
+      - name: Remove Broken Gradle Wrapper
+        shell: bash
+        run: |
+          echo "Checking Gradle Wrapper..."
+
+          if [ -f "gradle/wrapper/gradle-wrapper.jar" ]; then
+            echo "Removing invalid gradle-wrapper.jar"
+            rm -f gradle/wrapper/gradle-wrapper.jar
+          fi
+
+          if [ -f "gradlew" ]; then
+            echo "Removing invalid gradlew"
+            rm -f gradlew
+          fi
+
+          if [ -f "gradlew.bat" ]; then
+            echo "Removing invalid gradlew.bat"
+            rm -f gradlew.bat
+          fi
+
+          echo "Broken wrapper removed."
+
+          echo ""
+          echo "Remaining Gradle files:"
+          find gradle -maxdepth 3 -type f 2>/dev/null || true
+
+      # ==========================================
+      # 3. Setup JDK 17
       # ==========================================
       - name: Setup JDK 17
         uses: actions/setup-java@v4
@@ -32,13 +61,13 @@ jobs:
           java-version: '17'
 
       # ==========================================
-      # 3. Android SDK
+      # 4. Setup Android SDK
       # ==========================================
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
       # ==========================================
-      # 4. Setup Gradle
+      # 5. Setup Gradle
       # ==========================================
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -46,26 +75,28 @@ jobs:
           gradle-version: '8.10.2'
 
       # ==========================================
-      # 5. Configure Android SDK
+      # 6. Configure Android SDK
       # ==========================================
       - name: Configure Android SDK
         shell: bash
         run: |
           echo "sdk.dir=$ANDROID_HOME" > local.properties
 
-          echo "Android SDK:"
+          echo "Android SDK configured:"
           cat local.properties
 
       # ==========================================
-      # 6. Verify project
+      # 7. Verify Android project
       # ==========================================
       - name: Verify Android Project
         shell: bash
         run: |
-          echo "======================================"
-          echo "LinguaX Project"
-          echo "======================================"
+          echo "=========================================="
+          echo "LinguaX Android Project"
+          echo "=========================================="
 
+          echo ""
+          echo "Project root:"
           pwd
 
           echo ""
@@ -84,22 +115,24 @@ jobs:
           test -f app/build.gradle.kts
 
           echo ""
-          echo "Required Android files found."
+          echo "Required Gradle files found successfully."
 
       # ==========================================
-      # 7. Check Gradle
+      # 8. Check Gradle
       # ==========================================
       - name: Check Gradle Version
         run: |
           gradle --version
 
       # ==========================================
-      # 8. Create debug keystore
+      # 9. Create debug keystore
       # ==========================================
       - name: Create Debug Keystore
         shell: bash
         run: |
           mkdir -p "$HOME/.android"
+
+          rm -f "$HOME/.android/debug.keystore"
 
           keytool \
             -genkeypair \
@@ -115,21 +148,12 @@ jobs:
 
           cp "$HOME/.android/debug.keystore" ./debug.keystore
 
-          echo "Debug keystore ready."
+          echo "Debug keystore created successfully."
+
+          ls -lh debug.keystore
 
       # ==========================================
-      # 9. Remove broken wrapper from build path
-      # ==========================================
-      - name: Disable Broken Gradle Wrapper
-        shell: bash
-        run: |
-          if [ -f "gradle/wrapper/gradle-wrapper.jar" ]; then
-            echo "Broken/incomplete wrapper detected."
-            echo "Global Gradle will be used by this workflow."
-          fi
-
-      # ==========================================
-      # 10. Clean
+      # 10. Clean project
       # ==========================================
       - name: Clean Project
         run: |
@@ -138,7 +162,7 @@ jobs:
             --stacktrace
 
       # ==========================================
-      # 11. Build APK
+      # 11. Build Debug APK
       # ==========================================
       - name: Build APK with Gradle
         run: |
@@ -153,9 +177,9 @@ jobs:
       - name: Find APK
         shell: bash
         run: |
-          echo "======================================"
-          echo "Searching for generated APK"
-          echo "======================================"
+          echo "=========================================="
+          echo "Searching for APK"
+          echo "=========================================="
 
           find app/build/outputs/apk \
             -type f \
@@ -167,14 +191,17 @@ jobs:
             -name "*.apk" | wc -l)
 
           if [ "$APK_COUNT" -eq 0 ]; then
-            echo "ERROR: APK was not generated."
+            echo "ERROR: No APK was generated."
             exit 1
           fi
+
+          echo ""
+          echo "APK generated successfully."
 
       # ==========================================
       # 13. Prepare APK
       # ==========================================
-      - name: Prepare APK
+      - name: Prepare LinguaX APK
         shell: bash
         run: |
           mkdir -p release
@@ -186,7 +213,7 @@ jobs:
 
           cp "$APK" release/LinguaX-debug.apk
 
-          echo "Generated APK:"
+          echo "Final APK:"
           ls -lh release/LinguaX-debug.apk
 
       # ==========================================
