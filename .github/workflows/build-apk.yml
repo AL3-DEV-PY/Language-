@@ -15,7 +15,7 @@ jobs:
     steps:
 
       # ==========================================
-      # 1. Checkout
+      # 1. Checkout repository
       # ==========================================
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -32,9 +32,16 @@ jobs:
 
 
       # ==========================================
-      # 3. Setup Node.js
-      # No npm cache because the project
-      # does not contain package-lock.json
+      # 3. Setup Gradle
+      # ==========================================
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+
+      # ==========================================
+      # 4. Setup Node.js
       # ==========================================
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -43,56 +50,7 @@ jobs:
 
 
       # ==========================================
-      # 4. Detect package manager
-      # ==========================================
-      - name: Detect package manager
-        id: package_manager
-        shell: bash
-        run: |
-          if [ -f "pnpm-lock.yaml" ]; then
-            echo "manager=pnpm" >> "$GITHUB_OUTPUT"
-            echo "Package manager: pnpm"
-
-          elif [ -f "yarn.lock" ]; then
-            echo "manager=yarn" >> "$GITHUB_OUTPUT"
-            echo "Package manager: yarn"
-
-          elif [ -f "package-lock.json" ]; then
-            echo "manager=npm" >> "$GITHUB_OUTPUT"
-            echo "Package manager: npm"
-
-          elif [ -f "package.json" ]; then
-            echo "manager=npm" >> "$GITHUB_OUTPUT"
-            echo "Package manager: npm (no lockfile)"
-
-          else
-            echo "manager=none" >> "$GITHUB_OUTPUT"
-            echo "No package.json found"
-
-          fi
-
-
-      # ==========================================
-      # 5. Enable Corepack
-      # ==========================================
-      - name: Enable Corepack
-        if: steps.package_manager.outputs.manager == 'pnpm' || steps.package_manager.outputs.manager == 'yarn'
-        run: |
-          corepack enable
-
-
-      # ==========================================
-      # 6. Setup pnpm
-      # ==========================================
-      - name: Setup pnpm
-        if: steps.package_manager.outputs.manager == 'pnpm'
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
-
-      # ==========================================
-      # 7. Setup Supabase environment
+      # 5. Create Supabase environment
       # ==========================================
       - name: Create Supabase environment
         shell: bash
@@ -119,7 +77,7 @@ jobs:
 
 
       # ==========================================
-      # 8. Generate debug.keystore
+      # 6. Generate debug.keystore
       # ==========================================
       - name: Generate debug.keystore
         shell: bash
@@ -137,11 +95,11 @@ jobs:
             -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
 
-          echo "debug.keystore created."
+          echo "debug.keystore created successfully."
 
 
       # ==========================================
-      # 9. Verify debug.keystore
+      # 7. Verify debug.keystore
       # ==========================================
       - name: Verify debug.keystore
         shell: bash
@@ -159,119 +117,42 @@ jobs:
             -keystore "$GITHUB_WORKSPACE/debug.keystore" \
             -storepass android
 
-          echo "debug.keystore verified successfully."
+          echo "debug.keystore verified."
 
 
       # ==========================================
-      # 10. Install JavaScript dependencies
+      # 8. Show Android project structure
       # ==========================================
-      - name: Install dependencies
-        if: steps.package_manager.outputs.manager != 'none'
-        shell: bash
-        run: |
-
-          if [ "${{ steps.package_manager.outputs.manager }}" = "pnpm" ]; then
-
-            pnpm install --frozen-lockfile
-
-          elif [ "${{ steps.package_manager.outputs.manager }}" = "yarn" ]; then
-
-            yarn install --immutable
-
-          elif [ -f "package-lock.json" ]; then
-
-            npm ci
-
-          else
-
-            npm install
-
-          fi
-
-
-      # ==========================================
-      # 11. Build web application
-      # ==========================================
-      - name: Build web application
-        if: steps.package_manager.outputs.manager != 'none'
-        shell: bash
-        env:
-          VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-        run: |
-
-          if [ "${{ steps.package_manager.outputs.manager }}" = "pnpm" ]; then
-
-            pnpm run build
-
-          elif [ "${{ steps.package_manager.outputs.manager }}" = "yarn" ]; then
-
-            yarn build
-
-          else
-
-            npm run build
-
-          fi
-
-
-      # ==========================================
-      # 12. Check project structure
-      # ==========================================
-      - name: Check project structure
+      - name: Check Android project
         shell: bash
         run: |
           echo "===================================="
-          echo "Project root:"
+          echo "PROJECT ROOT"
+          echo "===================================="
+
           pwd
-          echo "===================================="
-
-          echo "Root files:"
           ls -la
 
           echo "===================================="
-
-          echo "Searching for Gradle wrapper:"
-          find . -maxdepth 4 -name "gradlew" -type f -print
-
+          echo "ANDROID APP"
           echo "===================================="
 
-          echo "Searching for Android app:"
-          find . -maxdepth 5 -type d -name "app" -print
+          ls -la app
 
           echo "===================================="
+          echo "GRADLE FILES"
+          echo "===================================="
+
+          find . -maxdepth 3 \
+            -type f \
+            \( -name "build.gradle*" \
+            -o -name "settings.gradle*" \
+            -o -name "gradle.properties" \) \
+            -print
 
 
       # ==========================================
-      # 13. Make Gradle executable
-      # ==========================================
-      - name: Make Gradle executable
-        shell: bash
-        run: |
-
-          if [ -f "./gradlew" ]; then
-
-            chmod +x ./gradlew
-
-          elif [ -f "./android/gradlew" ]; then
-
-            chmod +x ./android/gradlew
-
-          else
-
-            echo "ERROR: Gradle wrapper not found."
-
-            find . -maxdepth 5 -type f \
-              \( -name "gradlew" -o -name "build.gradle" -o -name "build.gradle.kts" \) \
-              -print
-
-            exit 1
-
-          fi
-
-
-      # ==========================================
-      # 14. Build Android APK
+      # 9. Build Android APK
       # ==========================================
       - name: Build APK with Gradle
         shell: bash
@@ -280,39 +161,32 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
 
-          if [ -f "./gradlew" ]; then
+          echo "Starting Gradle build..."
 
-            echo "Using root Gradle wrapper."
+          echo "Gradle version:"
+          gradle --version
 
-            ./gradlew :app:assembleDebug \
-              --stacktrace \
-              --no-daemon
+          echo "Current directory:"
+          pwd
 
-          elif [ -f "./android/gradlew" ]; then
+          echo "Checking keystore:"
+          ls -lh "$GITHUB_WORKSPACE/debug.keystore"
 
-            echo "Using Android Gradle wrapper."
+          echo "Building APK..."
 
-            cd android
-
-            ./gradlew :app:assembleDebug \
-              --stacktrace \
-              --no-daemon
-
-          else
-
-            echo "ERROR: No Gradle wrapper found."
-            exit 1
-
-          fi
+          gradle :app:assembleDebug \
+            --stacktrace \
+            --no-daemon \
+            --console=plain
 
 
       # ==========================================
-      # 15. Find APK
+      # 10. Find APK
       # ==========================================
       - name: Find APK
         shell: bash
         run: |
-          echo "Searching for generated APK files..."
+          echo "Searching for APK..."
 
           find . \
             -type f \
@@ -321,7 +195,7 @@ jobs:
 
 
       # ==========================================
-      # 16. Verify APK
+      # 11. Verify APK
       # ==========================================
       - name: Verify APK
         shell: bash
@@ -340,14 +214,12 @@ jobs:
 
 
       # ==========================================
-      # 17. Upload APK
+      # 12. Upload APK
       # ==========================================
       - name: Upload LinguaX APK
         uses: actions/upload-artifact@v4
         with:
           name: LinguaX-Debug-APK
-          path: |
-            app/build/outputs/apk/debug/*.apk
-            android/app/build/outputs/apk/debug/*.apk
+          path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 30
