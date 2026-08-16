@@ -115,10 +115,10 @@ fun CoursesScreen(
 
         // Level Filter Chips
         val filterOptions = listOf(
-            "ALL" to "All Levels",
-            "BEGINNER" to "Beginner (A1-A2)",
-            "INTERMEDIATE" to "Intermediate (B1-B2)",
-            "ADVANCED" to "Advanced (C1-C2)"
+            "ALL" to l10n.allLevelsFilter,
+            "BEGINNER" to l10n.beginnerFilter,
+            "INTERMEDIATE" to l10n.intermediateFilter,
+            "ADVANCED" to l10n.advancedFilter
         )
 
         LazyRow(
@@ -190,7 +190,7 @@ fun CoursesScreen(
                             modifier = Modifier.size(48.dp)
                         )
                         Text(
-                            text = "No courses match the selected filter",
+                            text = l10n.noCoursesMatch,
                             style = MaterialTheme.typography.bodyMedium,
                             color = LinguaXTextSecondary
                         )

@@ -68,11 +68,11 @@ fun HomeScreen(
     val currentLevel = (currentXp / xpPerLevel) + 1
     val targetXpForNextLevel = currentLevel * xpPerLevel
     val levelTitle = when {
-        currentLevel >= 10 -> "Master Polyglot"
-        currentLevel >= 7 -> "Advanced"
-        currentLevel >= 4 -> "Intermediate"
-        currentLevel >= 2 -> "Apprentice"
-        else -> "Beginner"
+        currentLevel >= 10 -> l10n.levelMaster
+        currentLevel >= 7 -> l10n.levelAdvanced
+        currentLevel >= 4 -> l10n.levelIntermediate
+        currentLevel >= 2 -> l10n.levelApprentice
+        else -> l10n.levelBeginner
     }
 
     // Dynamic Rank estimation based on XP
@@ -81,9 +81,9 @@ fun HomeScreen(
     // Time-based personalized greeting
     val hour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
     val greetingPrefix = when {
-        hour in 5..11 -> if (l10n.appName == "لينجوا إكس") "صباح الخير" else "Good morning"
-        hour in 12..17 -> if (l10n.appName == "لينجوا إكس") "مساء الخير" else "Good afternoon"
-        else -> if (l10n.appName == "لينجوا إكس") "مساء الخير" else "Good evening"
+        hour in 5..11 -> l10n.goodMorning
+        hour in 12..17 -> l10n.goodAfternoon
+        else -> l10n.goodEvening
     }
     val userDisplayName = profile.displayName?.takeIf { it.isNotBlank() } ?: "Learner"
 
@@ -336,7 +336,7 @@ fun HomeScreen(
                 LinguaXStatPill(
                     icon = "🔥",
                     title = l10n.streakText,
-                    subtitle = if (profile.streak > 0) "${profile.streak} ${if (profile.streak == 1) "day" else "days"}" else "—",
+                    subtitle = if (profile.streak > 0) "${profile.streak} ${if (profile.streak == 1) l10n.dayUnit else l10n.daysUnit}" else "—",
                     accentColor = LinguaXStreak,
                     modifier = Modifier.weight(1f)
                 )
@@ -344,8 +344,8 @@ fun HomeScreen(
                 // Lessons Completed Pill
                 LinguaXStatPill(
                     icon = "📖",
-                    title = "Lessons",
-                    subtitle = "$completedLessonsCount done",
+                    title = l10n.lessonsCompleted,
+                    subtitle = "$completedLessonsCount",
                     accentColor = LinguaXAccent,
                     modifier = Modifier.weight(1f)
                 )
@@ -353,7 +353,7 @@ fun HomeScreen(
                 // Global Rank Pill
                 LinguaXStatPill(
                     icon = "🏅",
-                    title = "Rank",
+                    title = l10n.rankLabel,
                     subtitle = "#$rankNumber",
                     accentColor = LinguaXGold,
                     modifier = Modifier.weight(1f)
@@ -365,8 +365,8 @@ fun HomeScreen(
             // ==========================================
             LinguaXSectionHeader(
                 title = l10n.continueLearning,
-                subtitle = "Pick up where you left off",
-                actionText = "All Courses",
+                subtitle = l10n.pickUpWhereYouLeftOff,
+                actionText = l10n.allCourses,
                 onActionClick = onNavigateToCourses
             )
 

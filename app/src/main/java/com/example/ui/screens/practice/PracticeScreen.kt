@@ -251,7 +251,7 @@ private fun PracticeModesGrid(
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
-            text = "Practice Modes",
+            text = l10n.practiceModes,
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
             color = LinguaXTextPrimary
         )
@@ -506,7 +506,7 @@ private fun SmartReviewSection(
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
-                        text = if (hasReviewWords) "Start Smart Review (${bookmarkedWords.size})" else "Review 5 Sample Words",
+                        text = if (hasReviewWords) "${l10n.smartReview} (${bookmarkedWords.size})" else l10n.smartReview,
                         style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
                     )
                 }
@@ -548,7 +548,7 @@ private fun DailyChallengesPracticeSection(
         ResourceContainer(
             resource = challengesResource,
             loadingText = l10n.loading,
-            emptyText = "No active challenges today."
+            emptyText = l10n.noDataAvailable
         ) { challenges ->
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 challenges.forEach { challenge ->
@@ -652,7 +652,7 @@ private fun VocabularyExplorerHeader(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Vocabulary Library",
+                text = l10n.vocabularyTab,
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                 color = LinguaXTextPrimary
             )
@@ -676,7 +676,7 @@ private fun VocabularyExplorerHeader(
                             modifier = Modifier.size(14.dp)
                         )
                         Text(
-                            text = "Flashcard Mode",
+                            text = l10n.flashcards,
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                             color = LinguaXAccentLight
                         )
@@ -795,7 +795,7 @@ private fun VocabularyListContent(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "No vocabulary items match your filter.",
+                    text = l10n.noDataAvailable,
                     style = MaterialTheme.typography.bodyMedium,
                     color = LinguaXTextTertiary
                 )

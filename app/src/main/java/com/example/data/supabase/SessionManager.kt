@@ -22,6 +22,15 @@ class SessionManager(context: Context) {
         private const val KEY_ACCESS_TOKEN = "access_token"
         private const val KEY_PROFILE_JSON = "profile_json"
         private const val KEY_COMPLETED_LESSONS = "completed_lesson_ids"
+        private const val KEY_APP_LANGUAGE = "app_language"
+    }
+
+    fun saveAppLanguage(languageCode: String) {
+        prefs.edit().putString(KEY_APP_LANGUAGE, languageCode).apply()
+    }
+
+    fun loadAppLanguageCode(): String? {
+        return prefs.getString(KEY_APP_LANGUAGE, null)
     }
 
     fun saveCompletedLessonId(lessonId: String) {
@@ -72,20 +81,20 @@ class SessionManager(context: Context) {
                     username = json.optString("username").takeIf { it.isNotBlank() },
                     displayName = json.optString("display_name", email.substringBefore("@")),
                     avatarUrl = json.optString("avatar_url").takeIf { it.isNotBlank() },
-                    xp = json.optInt("xp", 420),
-                    coins = json.optInt("coins", 150),
-                    streak = json.optInt("streak", 7),
-                    dailyGoal = json.optInt("daily_goal", 30)
+                    xp = json.optInt("xp", 0),
+                    coins = json.optInt("coins", 0),
+                    streak = json.optInt("streak", 1),
+                    dailyGoal = json.optInt("daily_goal", 20)
                 )
             } catch (_: Exception) {
                 Profile(
                     id = userId,
                     username = email.substringBefore("@"),
                     displayName = email.substringBefore("@"),
-                    xp = 420,
-                    coins = 150,
-                    streak = 7,
-                    dailyGoal = 30
+                    xp = 0,
+                    coins = 0,
+                    streak = 1,
+                    dailyGoal = 20
                 )
             }
         } else {
@@ -93,10 +102,10 @@ class SessionManager(context: Context) {
                 id = userId,
                 username = email.substringBefore("@"),
                 displayName = email.substringBefore("@"),
-                xp = 420,
-                coins = 150,
-                streak = 7,
-                dailyGoal = 30
+                xp = 0,
+                coins = 0,
+                streak = 1,
+                dailyGoal = 20
             )
         }
 

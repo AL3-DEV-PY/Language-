@@ -55,13 +55,13 @@ fun LessonScreen(
             textContentColor = LinguaXTextSecondary,
             title = {
                 Text(
-                    text = "Quit Lesson?",
+                    text = l10n.quitLessonTitle,
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
                 )
             },
             text = {
                 Text(
-                    text = "Are you sure you want to leave? Your progress in this active session will be lost.",
+                    text = l10n.quitLessonMessage,
                     style = MaterialTheme.typography.bodyMedium
                 )
             },
@@ -73,7 +73,7 @@ fun LessonScreen(
                     },
                     modifier = Modifier.testTag("confirm_exit_button")
                 ) {
-                    Text("Quit", color = LinguaXError, fontWeight = FontWeight.Bold)
+                    Text(l10n.quitButton, color = LinguaXError, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -81,7 +81,7 @@ fun LessonScreen(
                     onClick = { showExitDialog = false },
                     modifier = Modifier.testTag("dismiss_exit_button")
                 ) {
-                    Text("Keep Learning", color = LinguaXAccent, fontWeight = FontWeight.SemiBold)
+                    Text(l10n.keepLearningButton, color = LinguaXAccent, fontWeight = FontWeight.SemiBold)
                 }
             }
         )
@@ -461,7 +461,7 @@ private fun LessonPlayingContent(
         } else {
             val isLast = playing.currentExerciseIndex + 1 >= playing.exercises.size
             LinguaX3DButton(
-                text = if (playing.isSaving) "Saving Progress..." else if (isLast) l10n.finishLesson else l10n.nextQuestion,
+                text = if (playing.isSaving) l10n.savingProgress else if (isLast) l10n.finishLesson else l10n.nextQuestion,
                 enabled = !playing.isSaving,
                 icon = if (isLast) Icons.Default.Check else Icons.AutoMirrored.Filled.ArrowForward,
                 gradient = if (isLast) LinguaXGreenGradient else LinguaXPrimaryGradient,
@@ -598,7 +598,7 @@ private fun LessonResultContent(
                         color = LinguaXSuccess
                     )
                     Text(
-                        text = "Accuracy",
+                        text = l10n.accuracyLabel,
                         style = MaterialTheme.typography.labelSmall,
                         color = LinguaXTextSecondary
                     )
@@ -631,7 +631,7 @@ private fun LessonResultContent(
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
-                        text = "${completed.correctCount} Correct",
+                        text = "${completed.correctCount} ✓",
                         style = MaterialTheme.typography.labelMedium,
                         color = LinguaXTextPrimary
                     )
@@ -648,7 +648,7 @@ private fun LessonResultContent(
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
-                        text = "${completed.incorrectCount} Mistakes",
+                        text = "${completed.incorrectCount} ✗",
                         style = MaterialTheme.typography.labelMedium,
                         color = LinguaXTextPrimary
                     )
@@ -659,7 +659,7 @@ private fun LessonResultContent(
         Spacer(modifier = Modifier.weight(1f))
 
         LinguaX3DButton(
-            text = "Continue to Dashboard",
+            text = l10n.continueLearning,
             icon = Icons.AutoMirrored.Filled.ArrowForward,
             gradient = LinguaXPrimaryGradient,
             onClick = onFinish,

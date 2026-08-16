@@ -101,8 +101,7 @@ fun LinguaXApp(viewModel: MainViewModel = viewModel()) {
                                 currentAppLanguage = appLanguage,
                                 onLanguageChange = { viewModel.setAppLanguage(it) },
                                 onNavigateToLogin = { authSubScreen = AuthSubScreen.LOGIN },
-                                onNavigateToSignup = { authSubScreen = AuthSubScreen.SIGNUP },
-                                onContinueAsGuest = { viewModel.continueAsGuest() }
+                                onNavigateToSignup = { authSubScreen = AuthSubScreen.SIGNUP }
                             )
                         }
                         AuthSubScreen.LOGIN -> {

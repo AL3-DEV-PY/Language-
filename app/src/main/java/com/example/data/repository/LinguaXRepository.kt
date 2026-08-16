@@ -36,7 +36,7 @@ private fun JSONObject.optNullableString(key: String): String? {
 }
 
 class LinguaXRepository(
-    private val sessionManager: com.example.data.supabase.SessionManager? = null
+    val sessionManager: com.example.data.supabase.SessionManager? = null
 ) {
 
     private val httpClient = OkHttpClient.Builder()
@@ -75,23 +75,7 @@ class LinguaXRepository(
 
     suspend fun login(email: String, password: String): Resource<UserSession> = withContext(Dispatchers.IO) {
         if (!SupabaseConfig.isConfigured) {
-            val mockUser = UserSession(
-                userId = "usr_demo_123",
-                email = email,
-                accessToken = "mock_token_abc",
-                profile = Profile(
-                    id = "usr_demo_123",
-                    username = email.substringBefore("@"),
-                    displayName = email.substringBefore("@").capitalizeWords(),
-                    xp = 420,
-                    coins = 150,
-                    streak = 7,
-                    dailyGoal = 30
-                )
-            )
-            _currentSession.value = mockUser
-            sessionManager?.saveSession(mockUser)
-            return@withContext Resource.Success(mockUser)
+            return@withContext Resource.Error("Authentication service is not configured.")
         }
 
         try {
@@ -115,15 +99,19 @@ class LinguaXRepository(
                 val userId = userObj.getString("id")
                 val userEmail = userObj.optString("email", email)
 
-                val profile = fetchProfileFromSupabase(userId, token) ?: Profile(
-                    id = userId,
-                    username = userEmail.substringBefore("@"),
-                    displayName = userEmail.substringBefore("@").capitalizeWords(),
-                    xp = 420,
-                    coins = 150,
-                    streak = 7,
-                    dailyGoal = 30
-                )
+                val profile = fetchProfileFromSupabase(userId, token) ?: run {
+                    val newProf = Profile(
+                        id = userId,
+                        username = userEmail.substringBefore("@"),
+                        displayName = userEmail.substringBefore("@").capitalizeWords(),
+                        xp = 0,
+                        coins = 0,
+                        streak = 1,
+                        dailyGoal = 20
+                    )
+                    createOrUpdateProfileInSupabase(newProf, token)
+                    newProf
+                }
 
                 val session = UserSession(userId, userEmail, token, profile)
                 _currentSession.value = session
@@ -143,29 +131,17 @@ class LinguaXRepository(
 
     suspend fun signup(email: String, password: String, displayName: String): Resource<UserSession> = withContext(Dispatchers.IO) {
         if (!SupabaseConfig.isConfigured) {
-            val mockUser = UserSession(
-                userId = "usr_demo_" + System.currentTimeMillis(),
-                email = email,
-                accessToken = "mock_token_" + System.currentTimeMillis(),
-                profile = Profile(
-                    id = "usr_demo_new",
-                    username = email.substringBefore("@"),
-                    displayName = if (displayName.isNotBlank()) displayName else email.substringBefore("@").capitalizeWords(),
-                    xp = 50,
-                    coins = 50,
-                    streak = 1,
-                    dailyGoal = 20
-                )
-            )
-            _currentSession.value = mockUser
-            sessionManager?.saveSession(mockUser)
-            return@withContext Resource.Success(mockUser)
+            return@withContext Resource.Error("Authentication service is not configured.")
         }
 
         try {
             val jsonBody = JSONObject().apply {
                 put("email", email)
                 put("password", password)
+                put("data", JSONObject().apply {
+                    put("display_name", displayName)
+                    put("username", email.substringBefore("@"))
+                })
             }
             val request = Request.Builder()
                 .url("${SupabaseConfig.url}/auth/v1/signup")
@@ -179,19 +155,29 @@ class LinguaXRepository(
             if (response.isSuccessful && responseString.isNotBlank()) {
                 val json = JSONObject(responseString)
                 val token = json.optNullableString("access_token")
-                val userObj = json.optJSONObject("user") ?: JSONObject()
-                val userId = userObj.optString("id", "usr_new")
-                val userEmail = userObj.optString("email", email)
+                val userObj = json.optJSONObject("user")
+                val userId = userObj?.optString("id") ?: ""
 
-                val profile = fetchProfileFromSupabase(userId, token) ?: Profile(
-                    id = userId,
-                    username = email.substringBefore("@"),
-                    displayName = if (displayName.isNotBlank()) displayName else email.substringBefore("@").capitalizeWords(),
-                    xp = 50,
-                    coins = 50,
-                    streak = 1,
-                    dailyGoal = 20
-                )
+                if (userId.isBlank()) {
+                    return@withContext Resource.Error("Signup was received, but no user ID was returned.")
+                }
+
+                val userEmail = userObj.optString("email", email)
+                val cleanDisplayName = displayName.trim().ifBlank { userEmail.substringBefore("@").capitalizeWords() }
+
+                val profile = fetchProfileFromSupabase(userId, token) ?: run {
+                    val newProf = Profile(
+                        id = userId,
+                        username = userEmail.substringBefore("@"),
+                        displayName = cleanDisplayName,
+                        xp = 0,
+                        coins = 0,
+                        streak = 1,
+                        dailyGoal = 20
+                    )
+                    createOrUpdateProfileInSupabase(newProf, token)
+                    newProf
+                }
 
                 val session = UserSession(userId, userEmail, token, profile)
                 _currentSession.value = session
@@ -209,6 +195,30 @@ class LinguaXRepository(
     fun logout() {
         _currentSession.value = null
         sessionManager?.clearSession()
+    }
+
+    private fun createOrUpdateProfileInSupabase(profile: Profile, token: String?) {
+        try {
+            val jsonBody = JSONObject().apply {
+                put("id", profile.id)
+                put("display_name", profile.displayName)
+                put("username", profile.username)
+                put("xp", profile.xp)
+                put("coins", profile.coins)
+                put("streak", profile.streak)
+                put("daily_goal", profile.dailyGoal)
+            }
+            val reqBuilder = Request.Builder()
+                .url("${SupabaseConfig.url}/rest/v1/profiles")
+                .header("apikey", SupabaseConfig.anonKey)
+                .header("Prefer", "resolution=merge-duplicates")
+                .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
+
+            if (!token.isNullOrBlank()) {
+                reqBuilder.header("Authorization", "Bearer $token")
+            }
+            httpClient.newCall(reqBuilder.build()).execute()
+        } catch (_: Exception) {}
     }
 
     private fun fetchProfileFromSupabase(userId: String, token: String?): Profile? {
@@ -230,10 +240,10 @@ class LinguaXRepository(
                         username = obj.optNullableString("username"),
                         displayName = obj.optString("display_name", "Learner"),
                         avatarUrl = obj.optNullableString("avatar_url"),
-                        xp = obj.optInt("xp", 420),
-                        coins = obj.optInt("coins", 150),
-                        streak = obj.optInt("streak", 7),
-                        dailyGoal = obj.optInt("daily_goal", 30)
+                        xp = obj.optInt("xp", 0),
+                        coins = obj.optInt("coins", 0),
+                        streak = obj.optInt("streak", 1),
+                        dailyGoal = obj.optInt("daily_goal", 20)
                     )
                 } else null
             } else null
@@ -958,8 +968,8 @@ class LinguaXRepository(
                                 iconName = obj.optString("icon", "star"),
                                 category = obj.optString("category", "General"),
                                 maxProgress = obj.optInt("max_progress", 5),
-                                isUnlocked = obj.optBoolean("is_unlocked", true),
-                                progress = obj.optInt("progress", 5)
+                                isUnlocked = obj.optBoolean("is_unlocked", false),
+                                progress = obj.optInt("progress", 0)
                             )
                         )
                     }
@@ -968,12 +978,68 @@ class LinguaXRepository(
             } catch (_: Exception) {}
         }
 
+        val profile = _currentSession.value?.profile
+        val userXp = profile?.xp ?: 0
+        val userStreak = profile?.streak ?: 0
+        val completedCount = completedLessonIds.size
+        val vocabCount = bookmarkedVocabIds.size
+
         val list = listOf(
-            AchievementItem("ach_1", "Genesis Learner", "Completed your very first interactive lesson", "star", "Beginner", 1, true, "2026-08-01", 1),
-            AchievementItem("ach_2", "7-Day Flame", "Maintained an unbroken 7-day learning streak", "fire", "Streak", 7, true, "2026-08-10", 7),
-            AchievementItem("ach_3", "Polyglot Apprentice", "Explored 3 distinct world languages", "globe", "Explorer", 3, true, "2026-08-12", 3),
-            AchievementItem("ach_4", "XP Master 500", "Accumulated over 500 total mastery XP", "trophy", "Milestone", 500, false, null, 420),
-            AchievementItem("ach_5", "Vocabulary Titan", "Bookmarked and mastered 20 vocabulary cards", "book", "Vocabulary", 20, false, null, 12)
+            AchievementItem(
+                id = "ach_1",
+                title = "Genesis Learner",
+                description = "Complete your very first interactive lesson",
+                iconName = "star",
+                category = "Beginner",
+                maxProgress = 1,
+                isUnlocked = completedCount >= 1,
+                unlockedAt = if (completedCount >= 1) "Active" else null,
+                progress = completedCount.coerceAtMost(1)
+            ),
+            AchievementItem(
+                id = "ach_2",
+                title = "7-Day Flame",
+                description = "Maintain an unbroken 7-day learning streak",
+                iconName = "fire",
+                category = "Streak",
+                maxProgress = 7,
+                isUnlocked = userStreak >= 7,
+                unlockedAt = if (userStreak >= 7) "Active" else null,
+                progress = userStreak.coerceAtMost(7)
+            ),
+            AchievementItem(
+                id = "ach_3",
+                title = "Polyglot Apprentice",
+                description = "Complete 3 distinct language lessons",
+                iconName = "globe",
+                category = "Explorer",
+                maxProgress = 3,
+                isUnlocked = completedCount >= 3,
+                unlockedAt = if (completedCount >= 3) "Active" else null,
+                progress = completedCount.coerceAtMost(3)
+            ),
+            AchievementItem(
+                id = "ach_4",
+                title = "XP Master 500",
+                description = "Accumulate over 500 total mastery XP",
+                iconName = "trophy",
+                category = "Milestone",
+                maxProgress = 500,
+                isUnlocked = userXp >= 500,
+                unlockedAt = if (userXp >= 500) "Active" else null,
+                progress = userXp.coerceAtMost(500)
+            ),
+            AchievementItem(
+                id = "ach_5",
+                title = "Vocabulary Titan",
+                description = "Bookmark and master 20 vocabulary cards",
+                iconName = "book",
+                category = "Vocabulary",
+                maxProgress = 20,
+                isUnlocked = vocabCount >= 20,
+                unlockedAt = if (vocabCount >= 20) "Active" else null,
+                progress = vocabCount.coerceAtMost(20)
+            )
         )
         Resource.Success(list)
     }

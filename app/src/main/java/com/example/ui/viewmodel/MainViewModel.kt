@@ -76,11 +76,15 @@ class MainViewModel @JvmOverloads constructor(
     private val repository: LinguaXRepository = LinguaXRepository(SessionManager(application))
 ) : AndroidViewModel(application) {
 
-    // App Interface Language
-    private val _appLanguage = MutableStateFlow(AppLanguage.ENGLISH)
+    // App Interface Language - Initialized from persistent preferences (defaulting to Arabic)
+    private val initialLanguage: AppLanguage = repository.sessionManager?.loadAppLanguageCode()?.let {
+        AppLanguage.fromCode(it)
+    } ?: AppLanguage.ARABIC
+
+    private val _appLanguage = MutableStateFlow(initialLanguage)
     val appLanguage: StateFlow<AppLanguage> = _appLanguage.asStateFlow()
 
-    private val _l10n = MutableStateFlow(Translations.get(AppLanguage.ENGLISH))
+    private val _l10n = MutableStateFlow(Translations.get(initialLanguage))
     val l10n: StateFlow<L10nStrings> = _l10n.asStateFlow()
 
     // Auth state synchronized continuously with repository session
@@ -151,6 +155,7 @@ class MainViewModel @JvmOverloads constructor(
     fun setAppLanguage(language: AppLanguage) {
         _appLanguage.value = language
         _l10n.value = Translations.get(language)
+        repository.sessionManager?.saveAppLanguage(language.code)
     }
 
     fun setSelectedTargetLanguage(language: LanguageItem) {
@@ -210,10 +215,6 @@ class MainViewModel @JvmOverloads constructor(
         if (_authState.value is AuthState.Error) {
             _authState.value = AuthState.Unauthenticated
         }
-    }
-
-    fun continueAsGuest() {
-        login("learner@linguax.com", "demo123456")
     }
 
     fun logout() {

@@ -195,16 +195,16 @@ fun ProfileScreen(
                                 color = LinguaXTextTertiary
                             )
 
-                            // Supabase Cloud Connected Badge
+                            // Account Saved Status Badge
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
                                 color = LinguaXSuccess.copy(alpha = 0.15f),
                                 border = androidx.compose.foundation.BorderStroke(0.8.dp, LinguaXSuccess.copy(alpha = 0.4f))
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                                 ) {
                                     Box(
                                         modifier = Modifier
@@ -213,10 +213,10 @@ fun ProfileScreen(
                                             .background(LinguaXSuccess)
                                     )
                                     Text(
-                                        text = l10n.supabaseConnected,
+                                        text = l10n.accountSaved,
                                         style = MaterialTheme.typography.labelSmall.copy(
                                             fontWeight = FontWeight.SemiBold,
-                                            fontSize = 10.sp
+                                            fontSize = 11.sp
                                         ),
                                         color = LinguaXSuccess
                                     )
@@ -232,7 +232,7 @@ fun ProfileScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = "Level $currentLevel Progress",
+                                text = "${l10n.levelProgressTitle} ($currentLevel)",
                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
                                 color = LinguaXTextSecondary
                             )
@@ -281,7 +281,7 @@ fun ProfileScreen(
                 )
                 ProfileStatCard(
                     title = l10n.streakText,
-                    value = "${profile.streak} Days",
+                    value = "${profile.streak} ${if (profile.streak == 1) l10n.dayUnit else l10n.daysUnit}",
                     icon = Icons.Default.LocalFireDepartment,
                     accentColor = LinguaXFlame,
                     modifier = Modifier.weight(1f)
@@ -327,11 +327,11 @@ fun ProfileScreen(
                 ResourceContainer(
                     resource = achievementsResource,
                     loadingText = l10n.loading,
-                    emptyText = "No achievements recorded yet."
+                    emptyText = l10n.noDataAvailable
                 ) { achievementsList: List<AchievementItem> ->
                     if (achievementsList.isEmpty()) {
                         Text(
-                            text = "No achievements unlocked yet. Keep studying!",
+                            text = l10n.noDataAvailable,
                             style = MaterialTheme.typography.bodySmall,
                             color = LinguaXTextTertiary
                         )
@@ -401,7 +401,7 @@ fun ProfileScreen(
                     // Edit Display Name Row
                     ProfileMenuRow(
                         icon = Icons.Default.Edit,
-                        title = "Edit Name",
+                        title = l10n.editName,
                         subtitle = displayName,
                         onClick = { showEditProfileDialog = true },
                         testTag = "menu_edit_profile"
@@ -442,7 +442,7 @@ fun ProfileScreen(
                 },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AppLanguage.values().forEach { lang ->
+                        AppLanguage.supportedLanguages.forEach { lang ->
                             val isSelected = currentAppLanguage == lang
                             Surface(
                                 onClick = {
@@ -490,7 +490,7 @@ fun ProfileScreen(
                 },
                 confirmButton = {
                     TextButton(onClick = { showLanguageDialog = false }) {
-                        Text("Close", color = LinguaXPrimaryLight)
+                        Text(l10n.saveChanges, color = LinguaXPrimaryLight)
                     }
                 },
                 containerColor = Color(0xFF131C2E)
@@ -513,7 +513,7 @@ fun ProfileScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        listOf(15, 30, 50).forEach { goal ->
+                        listOf(15 to "15 XP", 30 to "30 XP", 50 to "50 XP").forEach { (goal, label) ->
                             val isSelected = dailyGoal == goal
                             Surface(
                                 onClick = {
@@ -530,14 +530,9 @@ fun ProfileScreen(
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
                                     Text(
-                                        text = "$goal XP",
+                                        text = label,
                                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                         color = if (isSelected) Color.White else LinguaXTextPrimary
-                                    )
-                                    Text(
-                                        text = if (goal == 15) "Casual" else if (goal == 30) "Regular" else "Intense",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = if (isSelected) Color.White.copy(alpha = 0.8f) else LinguaXTextTertiary
                                     )
                                 }
                             }
@@ -546,7 +541,7 @@ fun ProfileScreen(
                 },
                 confirmButton = {
                     TextButton(onClick = { showDailyGoalDialog = false }) {
-                        Text("Cancel", color = LinguaXTextSecondary)
+                        Text(l10n.saveChanges, color = LinguaXTextSecondary)
                     }
                 },
                 containerColor = Color(0xFF131C2E)
@@ -561,7 +556,7 @@ fun ProfileScreen(
                 onDismissRequest = { showEditProfileDialog = false },
                 title = {
                     Text(
-                        text = "Edit Profile Name",
+                        text = l10n.editName,
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = Color.White
                     )
@@ -578,26 +573,28 @@ fun ProfileScreen(
                             unfocusedContainerColor = Color(0xFF111726),
                             focusedBorderColor = LinguaXAccent,
                             unfocusedBorderColor = LinguaXBorder,
-                            focusedTextColor = LinguaXTextPrimary,
-                            unfocusedTextColor = LinguaXTextPrimary
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
                         ),
                         modifier = Modifier.fillMaxWidth()
                     )
                 },
                 confirmButton = {
-                    TextButton(onClick = {
-                        if (tempName.isNotBlank()) {
-                            displayName = tempName
-                            onUpdateProfile(tempName, dailyGoal)
+                    TextButton(
+                        onClick = {
+                            if (tempName.isNotBlank()) {
+                                displayName = tempName.trim()
+                                onUpdateProfile(displayName, dailyGoal)
+                            }
                             showEditProfileDialog = false
                         }
-                    }) {
-                        Text(l10n.saveChanges, color = LinguaXPrimaryLight, fontWeight = FontWeight.Bold)
+                    ) {
+                        Text(l10n.saveChanges, color = LinguaXAccent, fontWeight = FontWeight.Bold)
                     }
                 },
                 dismissButton = {
                     TextButton(onClick = { showEditProfileDialog = false }) {
-                        Text("Cancel", color = LinguaXTextSecondary)
+                        Text(l10n.quitButton, color = LinguaXTextSecondary)
                     }
                 },
                 containerColor = Color(0xFF131C2E)

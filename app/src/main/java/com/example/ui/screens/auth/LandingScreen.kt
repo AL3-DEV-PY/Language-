@@ -43,7 +43,6 @@ fun LandingScreen(
     onLanguageChange: (AppLanguage) -> Unit,
     onNavigateToLogin: () -> Unit,
     onNavigateToSignup: () -> Unit,
-    onContinueAsGuest: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showLanguageMenu by remember { mutableStateOf(false) }
@@ -204,23 +203,6 @@ fun LandingScreen(
                     onClick = onNavigateToLogin,
                     testTag = "landing_login_button"
                 )
-
-                TextButton(
-                    onClick = onContinueAsGuest,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(44.dp)
-                        .testTag("landing_guest_button")
-                ) {
-                    Text(
-                        text = "Explore as Guest",
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontWeight = FontWeight.Medium,
-                            fontSize = 14.sp
-                        ),
-                        color = LinguaXTextTertiary
-                    )
-                }
             }
         }
     }

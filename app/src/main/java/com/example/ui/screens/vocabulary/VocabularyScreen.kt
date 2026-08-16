@@ -158,7 +158,7 @@ fun VocabularyScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "No vocabulary items found.",
+                        text = l10n.noDataAvailable,
                         style = MaterialTheme.typography.bodyMedium,
                         color = LinguaXTextTertiary
                     )

@@ -282,7 +282,7 @@ private fun FlashcardActiveView(
                                 color = LinguaXSecondaryContainer
                             ) {
                                 Text(
-                                    text = "Meaning & Context",
+                                    text = l10n.vocabularyTab,
                                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                                     color = LinguaXSecondaryLight,
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
@@ -448,14 +448,14 @@ private fun FlashcardCompletedView(
                 }
 
                 Text(
-                    text = if (completedState.isSmartReview) "Smart Review Complete!" else "Flashcard Session Finished!",
+                    text = l10n.cardsReviewedSummary,
                     style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Black),
                     color = LinguaXTextPrimary,
                     textAlign = TextAlign.Center
                 )
 
                 Text(
-                    text = "Great job strengthening your active recall and vocabulary retention.",
+                    text = l10n.lessonCompletedTitle,
                     style = MaterialTheme.typography.bodyMedium,
                     color = LinguaXTextSecondary,
                     textAlign = TextAlign.Center
@@ -525,7 +525,7 @@ private fun FlashcardCompletedView(
                     )
                 ) {
                     Text(
-                        text = "Return to Practice Hub",
+                        text = l10n.practiceTab,
                         style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
                     )
                 }
