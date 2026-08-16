@@ -11,48 +11,42 @@ permissions:
 
 jobs:
   build:
-    name: Build Android APK
+    name: Build LinguaX Android APK
     runs-on: ubuntu-latest
 
     steps:
 
       # ==========================================
-      # 1. Checkout repository
+      # 1. Checkout
       # ==========================================
       - name: Checkout Repository
         uses: actions/checkout@v4
 
       # ==========================================
-      # 2. Remove broken Gradle Wrapper
+      # 2. Remove corrupted Gradle Wrapper
       # ==========================================
-      - name: Remove Broken Gradle Wrapper
+      - name: Remove Corrupted Gradle Wrapper
         shell: bash
         run: |
           echo "Checking Gradle Wrapper..."
 
           if [ -f "gradle/wrapper/gradle-wrapper.jar" ]; then
-            echo "Removing invalid gradle-wrapper.jar"
+            echo "Removing corrupted gradle-wrapper.jar"
             rm -f gradle/wrapper/gradle-wrapper.jar
           fi
 
           if [ -f "gradlew" ]; then
-            echo "Removing invalid gradlew"
             rm -f gradlew
           fi
 
           if [ -f "gradlew.bat" ]; then
-            echo "Removing invalid gradlew.bat"
             rm -f gradlew.bat
           fi
 
-          echo "Broken wrapper removed."
-
-          echo ""
-          echo "Remaining Gradle files:"
-          find gradle -maxdepth 3 -type f 2>/dev/null || true
+          echo "Wrapper removed successfully."
 
       # ==========================================
-      # 3. Setup JDK 17
+      # 3. JDK 17
       # ==========================================
       - name: Setup JDK 17
         uses: actions/setup-java@v4
@@ -61,71 +55,98 @@ jobs:
           java-version: '17'
 
       # ==========================================
-      # 4. Setup Android SDK
+      # 4. Android SDK
       # ==========================================
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
       # ==========================================
-      # 5. Setup Gradle
+      # 5. Install Android SDK 36
       # ==========================================
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.10.2'
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          sdkmanager "platform-tools"
+          sdkmanager "platforms;android-36"
+          sdkmanager "build-tools;36.0.0"
 
       # ==========================================
-      # 6. Configure Android SDK
+      # 6. Setup exact Gradle version
+      # ==========================================
+      - name: Setup Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      # ==========================================
+      # 7. Configure Android SDK
       # ==========================================
       - name: Configure Android SDK
         shell: bash
         run: |
           echo "sdk.dir=$ANDROID_HOME" > local.properties
 
-          echo "Android SDK configured:"
+          echo "Android SDK:"
           cat local.properties
 
       # ==========================================
-      # 7. Verify Android project
+      # 8. Verify Java / Gradle
       # ==========================================
-      - name: Verify Android Project
+      - name: Verify Build Environment
         shell: bash
         run: |
           echo "=========================================="
-          echo "LinguaX Android Project"
+          echo "JAVA"
           echo "=========================================="
 
+          java -version
+
           echo ""
-          echo "Project root:"
+          echo "=========================================="
+          echo "GRADLE"
+          echo "=========================================="
+
+          gradle --version
+
+          echo ""
+          echo "=========================================="
+          echo "ANDROID SDK"
+          echo "=========================================="
+
+          echo "$ANDROID_HOME"
+
+      # ==========================================
+      # 9. Verify Project Structure
+      # ==========================================
+      - name: Verify LinguaX Project
+        shell: bash
+        run: |
+          echo "=========================================="
+          echo "LINGUAX PROJECT"
+          echo "=========================================="
+
           pwd
 
           echo ""
-          echo "Root files:"
+          echo "Root:"
           ls -la
 
           echo ""
-          echo "App directory:"
+          echo "App:"
           ls -la app
 
           echo ""
-          echo "Checking required files..."
+          echo "Required files:"
 
           test -f settings.gradle.kts
           test -f build.gradle.kts
           test -f app/build.gradle.kts
+          test -f gradle/libs.versions.toml
 
-          echo ""
-          echo "Required Gradle files found successfully."
-
-      # ==========================================
-      # 8. Check Gradle
-      # ==========================================
-      - name: Check Gradle Version
-        run: |
-          gradle --version
+          echo "All required files exist."
 
       # ==========================================
-      # 9. Create debug keystore
+      # 10. Create debug keystore
       # ==========================================
       - name: Create Debug Keystore
         shell: bash
@@ -146,25 +167,58 @@ jobs:
             -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
 
-          cp "$HOME/.android/debug.keystore" ./debug.keystore
+          cp "$HOME/.android/debug.keystore" debug.keystore
 
-          echo "Debug keystore created successfully."
-
-          ls -lh debug.keystore
+          echo "Debug keystore created."
 
       # ==========================================
-      # 10. Clean project
+      # 11. Configure Supabase
+      # ==========================================
+      - name: Configure Supabase
+        shell: bash
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          if [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_ANON_KEY" ]; then
+
+            cat > .env <<EOF
+          SUPABASE_URL=$SUPABASE_URL
+          SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY
+          VITE_SUPABASE_URL=$SUPABASE_URL
+          VITE_SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY
+          EOF
+
+            echo "Supabase environment configured."
+
+          else
+            echo "WARNING: Supabase GitHub Secrets are not configured."
+            echo "Continuing with project configuration."
+          fi
+
+      # ==========================================
+      # 12. Disable configuration cache temporarily
+      # ==========================================
+      - name: Disable Configuration Cache
+        shell: bash
+        run: |
+          echo "org.gradle.configuration-cache=false" >> gradle.properties
+
+      # ==========================================
+      # 13. Clean
       # ==========================================
       - name: Clean Project
+        shell: bash
         run: |
           gradle clean \
             --no-daemon \
             --stacktrace
 
       # ==========================================
-      # 11. Build Debug APK
+      # 14. Build Debug APK
       # ==========================================
-      - name: Build APK with Gradle
+      - name: Build Debug APK
+        shell: bash
         run: |
           gradle :app:assembleDebug \
             --no-daemon \
@@ -172,13 +226,13 @@ jobs:
             --warning-mode all
 
       # ==========================================
-      # 12. Find APK
+      # 15. Find APK
       # ==========================================
       - name: Find APK
         shell: bash
         run: |
           echo "=========================================="
-          echo "Searching for APK"
+          echo "GENERATED APK"
           echo "=========================================="
 
           find app/build/outputs/apk \
@@ -191,15 +245,12 @@ jobs:
             -name "*.apk" | wc -l)
 
           if [ "$APK_COUNT" -eq 0 ]; then
-            echo "ERROR: No APK was generated."
+            echo "ERROR: APK was not generated."
             exit 1
           fi
 
-          echo ""
-          echo "APK generated successfully."
-
       # ==========================================
-      # 13. Prepare APK
+      # 16. Prepare APK
       # ==========================================
       - name: Prepare LinguaX APK
         shell: bash
@@ -217,7 +268,7 @@ jobs:
           ls -lh release/LinguaX-debug.apk
 
       # ==========================================
-      # 14. Upload APK
+      # 17. Upload APK
       # ==========================================
       - name: Upload LinguaX APK
         uses: actions/upload-artifact@v4
