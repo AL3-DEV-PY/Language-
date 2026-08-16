@@ -63,6 +63,41 @@ android {
   }
 }
 
+// Ensure CI/CD environment variables or Gradle properties are synced to .env
+val envFile = rootProject.file(".env")
+val resolvedSupabaseUrl = System.getenv("SUPABASE_URL")
+    ?: System.getenv("VITE_SUPABASE_URL")
+    ?: (project.findProperty("SUPABASE_URL") as? String)
+    ?: (project.findProperty("VITE_SUPABASE_URL") as? String)
+
+val resolvedSupabaseAnonKey = System.getenv("SUPABASE_ANON_KEY")
+    ?: System.getenv("VITE_SUPABASE_ANON_KEY")
+    ?: (project.findProperty("SUPABASE_ANON_KEY") as? String)
+    ?: (project.findProperty("VITE_SUPABASE_ANON_KEY") as? String)
+
+if (!resolvedSupabaseUrl.isNullOrBlank() || !resolvedSupabaseAnonKey.isNullOrBlank()) {
+    val existingLines = if (envFile.exists()) envFile.readLines() else emptyList()
+    val props = mutableMapOf<String, String>()
+    existingLines.forEach { line ->
+        val trimmed = line.trim()
+        if (trimmed.isNotEmpty() && !trimmed.startsWith("#") && trimmed.contains("=")) {
+            val key = trimmed.substringBefore("=").trim()
+            val value = trimmed.substringAfter("=").trim()
+            props[key] = value
+        }
+    }
+    if (!resolvedSupabaseUrl.isNullOrBlank()) {
+        props["SUPABASE_URL"] = resolvedSupabaseUrl.trim().removeSurrounding("\"").removeSurrounding("'")
+        props["VITE_SUPABASE_URL"] = resolvedSupabaseUrl.trim().removeSurrounding("\"").removeSurrounding("'")
+    }
+    if (!resolvedSupabaseAnonKey.isNullOrBlank()) {
+        props["SUPABASE_ANON_KEY"] = resolvedSupabaseAnonKey.trim().removeSurrounding("\"").removeSurrounding("'")
+        props["VITE_SUPABASE_ANON_KEY"] = resolvedSupabaseAnonKey.trim().removeSurrounding("\"").removeSurrounding("'")
+    }
+    val content = props.entries.joinToString("\n") { "${it.key}=${it.value}" }
+    envFile.writeText(content + "\n")
+}
+
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
 // to match the convention used in Web projects.
 secrets {
