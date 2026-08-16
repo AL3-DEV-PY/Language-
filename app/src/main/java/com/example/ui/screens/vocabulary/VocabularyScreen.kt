@@ -1,8 +1,7 @@
 package com.example.ui.screens.vocabulary
 
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -16,15 +15,19 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.i18n.L10nStrings
 import com.example.data.model.LanguageItem
 import com.example.data.model.VocabularyItem
 import com.example.data.repository.Resource
+import com.example.ui.audio.AudioPlayerManager
+import com.example.ui.audio.rememberAudioPlayerManager
 import com.example.ui.components.LinguaX3DCard
 import com.example.ui.components.LinguaXHeader
 import com.example.ui.components.ResourceContainer
@@ -36,10 +39,12 @@ fun VocabularyScreen(
     selectedTargetLanguage: LanguageItem,
     vocabularyResource: Resource<List<VocabularyItem>>,
     onToggleBookmark: (VocabularyItem) -> Unit,
+    onRetry: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var filterBookmarkedOnly by remember { mutableStateOf(false) }
+    val audioPlayer = rememberAudioPlayerManager()
 
     Column(
         modifier = modifier
@@ -141,7 +146,8 @@ fun VocabularyScreen(
         ResourceContainer(
             resource = vocabularyResource,
             loadingText = l10n.loading,
-            emptyText = l10n.noDataAvailable
+            emptyText = l10n.noDataAvailable,
+            onRetry = onRetry
         ) { vocabList ->
             val filtered = vocabList.filter { item ->
                 val matchesQuery = item.word.contains(searchQuery, ignoreCase = true) ||
@@ -168,9 +174,11 @@ fun VocabularyScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    items(filtered) { vocab ->
+                    items(filtered, key = { it.id }) { vocab ->
                         VocabularyCardItem(
                             item = vocab,
+                            languageCode = selectedTargetLanguage.code,
+                            audioPlayer = audioPlayer,
                             onToggleBookmark = { onToggleBookmark(vocab) }
                         )
                     }
@@ -183,12 +191,29 @@ fun VocabularyScreen(
 @Composable
 fun VocabularyCardItem(
     item: VocabularyItem,
+    languageCode: String,
+    audioPlayer: AudioPlayerManager,
     onToggleBookmark: () -> Unit
 ) {
-    var isAudioPlaying by remember { mutableStateOf(false) }
+    val isGlobalAudioPlaying by audioPlayer.isPlaying.collectAsStateWithLifecycle()
+    var isThisItemPlaying by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isGlobalAudioPlaying) {
+        if (!isGlobalAudioPlaying) {
+            isThisItemPlaying = false
+        }
+    }
+
+    val pulseScale by animateFloatAsState(
+        targetValue = if (isThisItemPlaying) 1.15f else 1f,
+        animationSpec = tween(300),
+        label = "vocab_pulse"
+    )
 
     LinguaX3DCard(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("vocab_item_${item.id}"),
         backgroundColor = Color(0xFF131C2E),
         borderBrush = LinguaXBorderGradient,
         elevation = 4.dp
@@ -232,16 +257,25 @@ fun VocabularyCardItem(
                 ) {
                     // Audio pronunciation button
                     IconButton(
-                        onClick = { isAudioPlaying = !isAudioPlaying },
+                        onClick = {
+                            isThisItemPlaying = true
+                            audioPlayer.play(
+                                text = item.word,
+                                languageCode = languageCode,
+                                audioUrl = item.audioUrl
+                            )
+                        },
                         modifier = Modifier
                             .size(36.dp)
+                            .scale(pulseScale)
                             .clip(CircleShape)
-                            .background(if (isAudioPlaying) LinguaXAccent else Color(0xFF1C2840))
+                            .background(if (isThisItemPlaying) LinguaXAccent else Color(0xFF1C2840))
+                            .testTag("pronounce_vocab_${item.id}")
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.VolumeUp,
                             contentDescription = "Pronounce",
-                            tint = if (isAudioPlaying) Color.Black else LinguaXAccent,
+                            tint = if (isThisItemPlaying) Color.Black else LinguaXAccent,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -253,6 +287,7 @@ fun VocabularyCardItem(
                             .size(36.dp)
                             .clip(CircleShape)
                             .background(if (item.isBookmarked) LinguaXWarning.copy(alpha = 0.2f) else Color(0xFF1C2840))
+                            .testTag("bookmark_vocab_${item.id}")
                     ) {
                         Icon(
                             imageVector = if (item.isBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,

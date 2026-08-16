@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.i18n.L10nStrings
 import com.example.data.model.DailyChallenge
 import com.example.data.model.LanguageItem
@@ -49,6 +50,7 @@ fun PracticeScreen(
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var filterBookmarkedOnly by remember { mutableStateOf(false) }
+    val audioPlayer = com.example.ui.audio.rememberAudioPlayerManager()
 
     LazyColumn(
         modifier = modifier
@@ -118,6 +120,8 @@ fun PracticeScreen(
                 searchQuery = searchQuery,
                 filterBookmarkedOnly = filterBookmarkedOnly,
                 l10n = l10n,
+                selectedTargetLanguage = selectedTargetLanguage,
+                audioPlayer = audioPlayer,
                 onToggleBookmark = onToggleBookmark
             )
         }
@@ -773,6 +777,8 @@ private fun VocabularyListContent(
     searchQuery: String,
     filterBookmarkedOnly: Boolean,
     l10n: L10nStrings,
+    selectedTargetLanguage: LanguageItem,
+    audioPlayer: com.example.ui.audio.AudioPlayerManager,
     onToggleBookmark: (VocabularyItem) -> Unit
 ) {
     ResourceContainer(
@@ -805,6 +811,8 @@ private fun VocabularyListContent(
                 filtered.forEach { vocab ->
                     VocabularyCardItem(
                         item = vocab,
+                        languageCode = selectedTargetLanguage.code,
+                        audioPlayer = audioPlayer,
                         onToggleBookmark = { onToggleBookmark(vocab) }
                     )
                 }
@@ -816,12 +824,23 @@ private fun VocabularyListContent(
 @Composable
 private fun VocabularyCardItem(
     item: VocabularyItem,
+    languageCode: String,
+    audioPlayer: com.example.ui.audio.AudioPlayerManager,
     onToggleBookmark: () -> Unit
 ) {
-    var isAudioSimulated by remember { mutableStateOf(false) }
+    val isGlobalAudioPlaying by audioPlayer.isPlaying.collectAsStateWithLifecycle()
+    var isThisItemPlaying by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isGlobalAudioPlaying) {
+        if (!isGlobalAudioPlaying) {
+            isThisItemPlaying = false
+        }
+    }
 
     LinguaX3DCard(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("vocab_card_${item.id}"),
         backgroundColor = Color(0xFF131C2E),
         borderBrush = LinguaXBorderGradient,
         elevation = 3.dp
@@ -863,16 +882,24 @@ private fun VocabularyCardItem(
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     IconButton(
-                        onClick = { isAudioSimulated = !isAudioSimulated },
+                        onClick = {
+                            isThisItemPlaying = true
+                            audioPlayer.play(
+                                text = item.word,
+                                languageCode = languageCode,
+                                audioUrl = item.audioUrl
+                            )
+                        },
                         modifier = Modifier
                             .size(32.dp)
                             .clip(CircleShape)
-                            .background(if (isAudioSimulated) LinguaXAccent else Color(0xFF1C2840))
+                            .background(if (isThisItemPlaying) LinguaXAccent else Color(0xFF1C2840))
+                            .testTag("pronounce_practice_${item.id}")
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.VolumeUp,
                             contentDescription = "Pronounce",
-                            tint = if (isAudioSimulated) Color.Black else LinguaXAccent,
+                            tint = if (isThisItemPlaying) Color.Black else LinguaXAccent,
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -883,6 +910,7 @@ private fun VocabularyCardItem(
                             .size(32.dp)
                             .clip(CircleShape)
                             .background(if (item.isBookmarked) LinguaXWarning.copy(alpha = 0.2f) else Color(0xFF1C2840))
+                            .testTag("bookmark_practice_${item.id}")
                     ) {
                         Icon(
                             imageVector = if (item.isBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,

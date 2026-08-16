@@ -476,7 +476,7 @@ class LinguaXRepository(
 
         try {
             val request = Request.Builder()
-                .url("${SupabaseConfig.url}/rest/v1/languages?select=*&is_active=eq.true&order=sort_order.asc")
+                .url("${SupabaseConfig.url}/rest/v1/languages?select=*&order=id.asc")
                 .header("apikey", SupabaseConfig.anonKey)
                 .build()
 
@@ -512,28 +512,30 @@ class LinguaXRepository(
         }
     }
 
-    suspend fun getCourses(languageCode: String): Resource<List<Course>> = withContext(Dispatchers.IO) {
+    suspend fun getCourses(languageCode: String, languageId: Long? = null): Resource<List<Course>> = withContext(Dispatchers.IO) {
         if (!SupabaseConfig.isConfigured) {
             return@withContext Resource.Error("Database connection is not configured.")
         }
 
         try {
-            // Step 1: Look up Language ID by Code
-            var targetLangId: Long? = null
-            try {
-                val langReq = Request.Builder()
-                    .url("${SupabaseConfig.url}/rest/v1/languages?code=eq.$languageCode&select=id&limit=1")
-                    .header("apikey", SupabaseConfig.anonKey)
-                    .build()
-                val langResp = httpClient.newCall(langReq).execute()
-                val langStr = langResp.body?.string() ?: ""
-                if (langResp.isSuccessful && langStr.isNotBlank()) {
-                    val arr = JSONArray(langStr)
-                    if (arr.length() > 0) {
-                        targetLangId = arr.getJSONObject(0).getLong("id")
+            // Step 1: Look up Language ID by Code if not provided
+            var targetLangId: Long? = languageId
+            if (targetLangId == null) {
+                try {
+                    val langReq = Request.Builder()
+                        .url("${SupabaseConfig.url}/rest/v1/languages?code=eq.$languageCode&select=id&limit=1")
+                        .header("apikey", SupabaseConfig.anonKey)
+                        .build()
+                    val langResp = httpClient.newCall(langReq).execute()
+                    val langStr = langResp.body?.string() ?: ""
+                    if (langResp.isSuccessful && langStr.isNotBlank()) {
+                        val arr = JSONArray(langStr)
+                        if (arr.length() > 0) {
+                            targetLangId = arr.getJSONObject(0).getLong("id")
+                        }
                     }
-                }
-            } catch (_: Exception) {}
+                } catch (_: Exception) {}
+            }
 
             // Step 2: Fetch current user completed lessons from user_progress
             val session = _currentSession.value
@@ -543,9 +545,9 @@ class LinguaXRepository(
 
             // Step 3: Fetch courses for this language with nested units and lessons
             val url = if (targetLangId != null) {
-                "${SupabaseConfig.url}/rest/v1/courses?language_id=eq.$targetLangId&is_active=eq.true&select=*,units(*,lessons(*))&order=sort_order.asc"
+                "${SupabaseConfig.url}/rest/v1/courses?language_id=eq.$targetLangId&select=*,units(*,lessons(*))&order=id.asc"
             } else {
-                "${SupabaseConfig.url}/rest/v1/courses?is_active=eq.true&select=*,units(*,lessons(*))&order=sort_order.asc"
+                "${SupabaseConfig.url}/rest/v1/courses?select=*,units(*,lessons(*))&order=id.asc"
             }
 
             val request = Request.Builder()
@@ -568,7 +570,7 @@ class LinguaXRepository(
                     val unitsJson = cObj.optJSONArray("units") ?: JSONArray()
                     val unitsList = mutableListOf<UnitItem>()
 
-                    // Sort units by sort_order
+                    // Sort units by sort_order / order_index / id
                     val rawUnits = mutableListOf<JSONObject>()
                     for (u in 0 until unitsJson.length()) {
                         rawUnits.add(unitsJson.getJSONObject(u))
@@ -653,6 +655,8 @@ class LinguaXRepository(
                         )
                     )
                 }
+
+                coursesList.sortBy { it.sortOrder }
 
                 if (coursesList.isNotEmpty()) {
                     return@withContext Resource.Success(coursesList)

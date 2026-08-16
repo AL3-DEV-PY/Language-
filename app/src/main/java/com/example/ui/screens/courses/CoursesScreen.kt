@@ -46,6 +46,8 @@ fun CoursesScreen(
     coursesResource: Resource<List<Course>>,
     onLanguageSelected: (LanguageItem) -> Unit,
     onLessonClicked: (Lesson) -> Unit,
+    onRetryLanguages: (() -> Unit)? = null,
+    onRetryCourses: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var selectedLevelFilter by remember { mutableStateOf("ALL") }
@@ -67,7 +69,8 @@ fun CoursesScreen(
         ResourceContainer(
             resource = languagesResource,
             loadingText = l10n.loading,
-            emptyText = l10n.noDataAvailable
+            emptyText = l10n.noDataAvailable,
+            onRetry = onRetryLanguages
         ) { languages ->
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -158,7 +161,8 @@ fun CoursesScreen(
         ResourceContainer(
             resource = coursesResource,
             loadingText = l10n.loading,
-            emptyText = l10n.noDataAvailable
+            emptyText = l10n.noDataAvailable,
+            onRetry = onRetryCourses
         ) { courses ->
             val filteredCourses = remember(courses, selectedLevelFilter) {
                 if (selectedLevelFilter == "ALL") courses

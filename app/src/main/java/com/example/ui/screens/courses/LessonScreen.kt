@@ -1,6 +1,7 @@
 package com.example.ui.screens.courses
 
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,6 +19,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -26,9 +28,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.i18n.L10nStrings
 import com.example.data.model.Exercise
 import com.example.data.model.Lesson
+import com.example.ui.audio.AudioPlayerManager
+import com.example.ui.audio.rememberAudioPlayerManager
 import com.example.ui.components.LinguaX3DButton
 import com.example.ui.components.LinguaXProgressBar
 import com.example.ui.theme.*
@@ -38,6 +43,7 @@ import com.example.ui.viewmodel.LessonUiState
 fun LessonScreen(
     l10n: L10nStrings,
     lessonState: LessonUiState,
+    targetLanguageCode: String = "en",
     onSelectOption: (String) -> Unit,
     onCheckAnswer: () -> Unit,
     onProceed: () -> Unit,
@@ -46,6 +52,7 @@ fun LessonScreen(
     modifier: Modifier = Modifier
 ) {
     var showExitDialog by remember { mutableStateOf(false) }
+    val audioPlayer = rememberAudioPlayerManager()
 
     if (showExitDialog) {
         AlertDialog(
@@ -68,6 +75,7 @@ fun LessonScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
+                        audioPlayer.stop()
                         showExitDialog = false
                         onExit()
                     },
@@ -116,9 +124,14 @@ fun LessonScreen(
                 LessonPlayingContent(
                     l10n = l10n,
                     playing = lessonState,
+                    targetLanguageCode = targetLanguageCode,
+                    audioPlayer = audioPlayer,
                     onSelectOption = onSelectOption,
                     onCheckAnswer = onCheckAnswer,
-                    onProceed = onProceed,
+                    onProceed = {
+                        audioPlayer.stop()
+                        onProceed()
+                    },
                     onRequestExit = { showExitDialog = true }
                 )
             }
@@ -126,7 +139,10 @@ fun LessonScreen(
                 LessonResultContent(
                     l10n = l10n,
                     completed = lessonState,
-                    onFinish = onExit
+                    onFinish = {
+                        audioPlayer.stop()
+                        onExit()
+                    }
                 )
             }
             is LessonUiState.Error -> {
@@ -134,11 +150,14 @@ fun LessonScreen(
                     l10n = l10n,
                     error = lessonState,
                     onRetry = onRetrySave,
-                    onExit = onExit
+                    onExit = {
+                        audioPlayer.stop()
+                        onExit()
+                    }
                 )
             }
             is LessonUiState.Idle -> {
-                // Not active
+                // Inactive state
             }
         }
     }
@@ -148,6 +167,8 @@ fun LessonScreen(
 private fun LessonPlayingContent(
     l10n: L10nStrings,
     playing: LessonUiState.Playing,
+    targetLanguageCode: String,
+    audioPlayer: AudioPlayerManager,
     onSelectOption: (String) -> Unit,
     onCheckAnswer: () -> Unit,
     onProceed: () -> Unit,
@@ -156,6 +177,36 @@ private fun LessonPlayingContent(
     val currentExercise = playing.exercises.getOrNull(playing.currentExerciseIndex) ?: return
     val progress = (playing.currentExerciseIndex + 1).toFloat() / playing.exercises.size.toFloat()
     val scrollState = rememberScrollState()
+    val isAudioPlaying by audioPlayer.isPlaying.collectAsStateWithLifecycle()
+
+    var typedAnswer by remember(currentExercise.id) { mutableStateOf("") }
+
+    val isListeningExercise = currentExercise.type.contains("LISTEN", ignoreCase = true)
+    val isFillBlankOrType = currentExercise.type.contains("TYPE", ignoreCase = true) ||
+            (currentExercise.type.contains("FILL", ignoreCase = true) && currentExercise.options.isEmpty())
+
+    // Infinite pulse animation for active audio
+    val infiniteTransition = rememberInfiniteTransition(label = "audio_pulse")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.15f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(600, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse_scale"
+    )
+
+    // Automatically speak prompt once if it is a listening exercise
+    LaunchedEffect(currentExercise.id) {
+        if (isListeningExercise) {
+            audioPlayer.play(
+                text = currentExercise.question,
+                languageCode = targetLanguageCode,
+                audioUrl = currentExercise.audioUrl
+            )
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -239,7 +290,7 @@ private fun LessonPlayingContent(
                 .verticalScroll(scrollState),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Exercise Type & Lesson Meta
+            // Exercise Type & Lesson Progress Meta
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -265,7 +316,7 @@ private fun LessonPlayingContent(
                 )
             }
 
-            // Question Box Card
+            // Question Card with Pronunciation Controls
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(20.dp),
@@ -274,7 +325,7 @@ private fun LessonPlayingContent(
             ) {
                 Column(
                     modifier = Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -292,97 +343,167 @@ private fun LessonPlayingContent(
                             modifier = Modifier.weight(1f)
                         )
 
-                        IconButton(
-                            onClick = { /* Audio Pronunciation Trigger */ },
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(LinguaXPrimary.copy(alpha = 0.25f))
+                        // Audio Controls: Normal Speed & Slow Speed
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-                                contentDescription = "Listen",
-                                tint = LinguaXAccentLight,
-                                modifier = Modifier.size(20.dp)
-                            )
+                            // Turtle / Slow Speed Pronunciation
+                            IconButton(
+                                onClick = {
+                                    audioPlayer.play(
+                                        text = currentExercise.question,
+                                        languageCode = targetLanguageCode,
+                                        isSlow = true,
+                                        audioUrl = currentExercise.audioUrl
+                                    )
+                                },
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF1C2840))
+                                    .testTag("audio_slow_button")
+                            ) {
+                                Text(text = "🐢", fontSize = 16.sp)
+                            }
+
+                            // Normal Speed Pronunciation
+                            IconButton(
+                                onClick = {
+                                    audioPlayer.play(
+                                        text = currentExercise.question,
+                                        languageCode = targetLanguageCode,
+                                        isSlow = false,
+                                        audioUrl = currentExercise.audioUrl
+                                    )
+                                },
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .scale(if (isAudioPlaying) pulseScale else 1f)
+                                    .clip(CircleShape)
+                                    .background(if (isAudioPlaying) LinguaXAccent else LinguaXPrimary.copy(alpha = 0.25f))
+                                    .testTag("audio_play_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                                    contentDescription = "Listen",
+                                    tint = if (isAudioPlaying) Color.Black else LinguaXAccentLight,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            // Options List
-            Text(
-                text = "Select the correct answer:",
-                style = MaterialTheme.typography.labelMedium,
-                color = LinguaXTextSecondary
-            )
+            // Interactive Options or Text Input
+            if (isFillBlankOrType) {
+                // Free text input mode
+                Text(
+                    text = "Type your answer:",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = LinguaXTextSecondary
+                )
 
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                currentExercise.options.forEach { option ->
-                    val isSelected = playing.selectedOption == option
-                    val isCorrectAnswer = option.trim().equals(currentExercise.correctAnswer.trim(), ignoreCase = true)
+                OutlinedTextField(
+                    value = typedAnswer,
+                    onValueChange = {
+                        if (!playing.isAnswerChecked) {
+                            typedAnswer = it
+                            onSelectOption(it)
+                        }
+                    },
+                    placeholder = { Text("Enter translated text...", color = LinguaXTextTertiary) },
+                    enabled = !playing.isAnswerChecked,
+                    singleLine = true,
+                    shape = RoundedCornerShape(16.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = Color(0xFF131E31),
+                        unfocusedContainerColor = Color(0xFF131E31),
+                        focusedBorderColor = LinguaXAccent,
+                        unfocusedBorderColor = LinguaXBorder,
+                        focusedTextColor = LinguaXTextPrimary,
+                        unfocusedTextColor = LinguaXTextPrimary
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("lesson_text_input")
+                )
+            } else {
+                // Multiple Choice / True-False / Options mode
+                Text(
+                    text = "Select the correct answer:",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = LinguaXTextSecondary
+                )
 
-                    val containerColor = when {
-                        playing.isAnswerChecked && isCorrectAnswer -> LinguaXSuccess.copy(alpha = 0.25f)
-                        playing.isAnswerChecked && isSelected && !isCorrectAnswer -> LinguaXError.copy(alpha = 0.25f)
-                        isSelected -> LinguaXPrimary.copy(alpha = 0.4f)
-                        else -> Color(0xFF131E31)
-                    }
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    currentExercise.options.forEach { option ->
+                        val isSelected = playing.selectedOption == option
+                        val isCorrectAnswer = option.trim().equals(currentExercise.correctAnswer.trim(), ignoreCase = true)
 
-                    val borderColor = when {
-                        playing.isAnswerChecked && isCorrectAnswer -> LinguaXSuccess
-                        playing.isAnswerChecked && isSelected && !isCorrectAnswer -> LinguaXError
-                        isSelected -> LinguaXAccent
-                        else -> LinguaXBorder
-                    }
+                        val containerColor = when {
+                            playing.isAnswerChecked && isCorrectAnswer -> LinguaXSuccess.copy(alpha = 0.25f)
+                            playing.isAnswerChecked && isSelected && !isCorrectAnswer -> LinguaXError.copy(alpha = 0.25f)
+                            isSelected -> LinguaXPrimary.copy(alpha = 0.4f)
+                            else -> Color(0xFF131E31)
+                        }
 
-                    Surface(
-                        onClick = {
-                            if (!playing.isAnswerChecked) {
-                                onSelectOption(option)
-                            }
-                        },
-                        shape = RoundedCornerShape(16.dp),
-                        color = containerColor,
-                        border = androidx.compose.foundation.BorderStroke(
-                            if (isSelected || playing.isAnswerChecked) 2.dp else 1.dp,
-                            borderColor
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("option_${option.take(6)}")
-                    ) {
-                        Row(
+                        val borderColor = when {
+                            playing.isAnswerChecked && isCorrectAnswer -> LinguaXSuccess
+                            playing.isAnswerChecked && isSelected && !isCorrectAnswer -> LinguaXError
+                            isSelected -> LinguaXAccent
+                            else -> LinguaXBorder
+                        }
+
+                        Surface(
+                            onClick = {
+                                if (!playing.isAnswerChecked) {
+                                    onSelectOption(option)
+                                }
+                            },
+                            shape = RoundedCornerShape(16.dp),
+                            color = containerColor,
+                            border = androidx.compose.foundation.BorderStroke(
+                                if (isSelected || playing.isAnswerChecked) 2.dp else 1.dp,
+                                borderColor
+                            ),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                                .testTag("option_${option.take(6)}")
                         ) {
-                            Text(
-                                text = option,
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    fontSize = 16.sp
-                                ),
-                                color = LinguaXTextPrimary,
-                                modifier = Modifier.weight(1f)
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = option,
+                                    style = MaterialTheme.typography.bodyLarge.copy(
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        fontSize = 16.sp
+                                    ),
+                                    color = LinguaXTextPrimary,
+                                    modifier = Modifier.weight(1f)
+                                )
 
-                            if (playing.isAnswerChecked && isCorrectAnswer) {
-                                Icon(
-                                    imageVector = Icons.Default.CheckCircle,
-                                    contentDescription = "Correct",
-                                    tint = LinguaXSuccess,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            } else if (playing.isAnswerChecked && isSelected && !isCorrectAnswer) {
-                                Icon(
-                                    imageVector = Icons.Default.Cancel,
-                                    contentDescription = "Incorrect",
-                                    tint = LinguaXError,
-                                    modifier = Modifier.size(24.dp)
-                                )
+                                if (playing.isAnswerChecked && isCorrectAnswer) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = "Correct",
+                                        tint = LinguaXSuccess,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                } else if (playing.isAnswerChecked && isSelected && !isCorrectAnswer) {
+                                    Icon(
+                                        imageVector = Icons.Default.Cancel,
+                                        contentDescription = "Incorrect",
+                                        tint = LinguaXError,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -454,7 +575,7 @@ private fun LessonPlayingContent(
         if (!playing.isAnswerChecked) {
             LinguaX3DButton(
                 text = l10n.checkAnswer,
-                enabled = playing.selectedOption != null && !playing.isSaving,
+                enabled = !playing.selectedOption.isNullOrBlank() && !playing.isSaving,
                 onClick = onCheckAnswer,
                 testTag = "check_answer_button"
             )

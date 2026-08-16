@@ -145,7 +145,7 @@ class MainViewModel @JvmOverloads constructor(
         }
 
         loadLanguages()
-        loadCourses(selectedTargetLanguage.value.code)
+        loadCourses(selectedTargetLanguage.value.code, selectedTargetLanguage.value.id)
         loadVocabulary(selectedTargetLanguage.value.code)
         loadChallenges()
         loadAchievements()
@@ -160,7 +160,7 @@ class MainViewModel @JvmOverloads constructor(
 
     fun setSelectedTargetLanguage(language: LanguageItem) {
         repository.setSelectedLanguage(language)
-        loadCourses(language.code)
+        loadCourses(language.code, language.id)
         loadVocabulary(language.code)
     }
 
@@ -229,10 +229,10 @@ class MainViewModel @JvmOverloads constructor(
         }
     }
 
-    fun loadCourses(languageCode: String) {
+    fun loadCourses(languageCode: String, languageId: Long? = null) {
         viewModelScope.launch {
             _coursesState.value = Resource.Loading
-            _coursesState.value = repository.getCourses(languageCode)
+            _coursesState.value = repository.getCourses(languageCode, languageId)
         }
     }
 

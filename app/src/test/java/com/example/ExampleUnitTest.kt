@@ -12,7 +12,7 @@ class ExampleUnitTest {
         val ar = Translations.get(AppLanguage.ARABIC)
 
         assertEquals("Practice", en.practiceTab)
-        assertEquals("تدريب", ar.practiceTab)
+        assertEquals("التدريب", ar.practiceTab)
         assertEquals("Smart Review", en.smartReview)
         assertEquals("المراجعة الذكية", ar.smartReview)
     }

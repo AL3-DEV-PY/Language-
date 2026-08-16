@@ -1,279 +1,53 @@
-name: Build LinguaX APK
+name: Build Android APK
 
 on:
-  workflow_dispatch:
   push:
-    branches:
-      - main
-
-permissions:
-  contents: read
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
 
 jobs:
   build:
-    name: Build LinguaX Android APK
+    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
-
-      # ==========================================
-      # 1. Checkout
-      # ==========================================
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # ==========================================
-      # 2. Remove corrupted Gradle Wrapper
-      # ==========================================
-      - name: Remove Corrupted Gradle Wrapper
-        shell: bash
-        run: |
-          echo "Checking Gradle Wrapper..."
-
-          if [ -f "gradle/wrapper/gradle-wrapper.jar" ]; then
-            echo "Removing corrupted gradle-wrapper.jar"
-            rm -f gradle/wrapper/gradle-wrapper.jar
-          fi
-
-          if [ -f "gradlew" ]; then
-            rm -f gradlew
-          fi
-
-          if [ -f "gradlew.bat" ]; then
-            rm -f gradlew.bat
-          fi
-
-          echo "Wrapper removed successfully."
-
-      # ==========================================
-      # 3. JDK 17
-      # ==========================================
-      - name: Setup JDK 17
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
           java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
 
-      # ==========================================
-      # 4. Android SDK
-      # ==========================================
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      # ==========================================
-      # 5. Install Android SDK 36
-      # ==========================================
-      - name: Install Android SDK 36
-        shell: bash
+      # IMPORTANT: Create the .env file with Supabase credentials BEFORE running Gradle build
+      - name: Configure Environment Variables
         run: |
-          sdkmanager "platform-tools"
-          sdkmanager "platforms;android-36"
-          sdkmanager "build-tools;36.0.0"
+          cat << 'EOF' > .env
+          SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
+          VITE_SUPABASE_URL=${{ secrets.VITE_SUPABASE_URL || secrets.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY=${{ secrets.VITE_SUPABASE_ANON_KEY || secrets.SUPABASE_ANON_KEY }}
+          EOF
+          echo "Created .env configuration file successfully."
 
-      # ==========================================
-      # 6. Setup exact Gradle version
-      # ==========================================
-      - name: Setup Gradle 9.3.1
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.3.1'
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
 
-      # ==========================================
-      # 7. Configure Android SDK
-      # ==========================================
-      - name: Configure Android SDK
-        shell: bash
-        run: |
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
-
-          echo "Android SDK:"
-          cat local.properties
-
-      # ==========================================
-      # 8. Verify Java / Gradle
-      # ==========================================
-      - name: Verify Build Environment
-        shell: bash
-        run: |
-          echo "=========================================="
-          echo "JAVA"
-          echo "=========================================="
-
-          java -version
-
-          echo ""
-          echo "=========================================="
-          echo "GRADLE"
-          echo "=========================================="
-
-          gradle --version
-
-          echo ""
-          echo "=========================================="
-          echo "ANDROID SDK"
-          echo "=========================================="
-
-          echo "$ANDROID_HOME"
-
-      # ==========================================
-      # 9. Verify Project Structure
-      # ==========================================
-      - name: Verify LinguaX Project
-        shell: bash
-        run: |
-          echo "=========================================="
-          echo "LINGUAX PROJECT"
-          echo "=========================================="
-
-          pwd
-
-          echo ""
-          echo "Root:"
-          ls -la
-
-          echo ""
-          echo "App:"
-          ls -la app
-
-          echo ""
-          echo "Required files:"
-
-          test -f settings.gradle.kts
-          test -f build.gradle.kts
-          test -f app/build.gradle.kts
-          test -f gradle/libs.versions.toml
-
-          echo "All required files exist."
-
-      # ==========================================
-      # 10. Create debug keystore
-      # ==========================================
-      - name: Create Debug Keystore
-        shell: bash
-        run: |
-          mkdir -p "$HOME/.android"
-
-          rm -f "$HOME/.android/debug.keystore"
-
-          keytool \
-            -genkeypair \
-            -v \
-            -keystore "$HOME/.android/debug.keystore" \
-            -storepass android \
-            -alias androiddebugkey \
-            -keypass android \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
-
-          cp "$HOME/.android/debug.keystore" debug.keystore
-
-          echo "Debug keystore created."
-
-      # ==========================================
-      # 11. Configure Supabase
-      # ==========================================
-      - name: Configure Supabase
-        shell: bash
+      - name: Build APK with Gradle Wrapper
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-        run: |
-          if [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_ANON_KEY" ]; then
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || secrets.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || secrets.SUPABASE_ANON_KEY }}
+        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
-            cat > .env <<EOF
-          SUPABASE_URL=$SUPABASE_URL
-          SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY
-          VITE_SUPABASE_URL=$SUPABASE_URL
-          VITE_SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY
-          EOF
-
-            echo "Supabase environment configured."
-
-          else
-            echo "WARNING: Supabase GitHub Secrets are not configured."
-            echo "Continuing with project configuration."
-          fi
-
-      # ==========================================
-      # 12. Disable configuration cache temporarily
-      # ==========================================
-      - name: Disable Configuration Cache
-        shell: bash
-        run: |
-          echo "org.gradle.configuration-cache=false" >> gradle.properties
-
-      # ==========================================
-      # 13. Clean
-      # ==========================================
-      - name: Clean Project
-        shell: bash
-        run: |
-          gradle clean \
-            --no-daemon \
-            --stacktrace
-
-      # ==========================================
-      # 14. Build Debug APK
-      # ==========================================
-      - name: Build Debug APK
-        shell: bash
-        run: |
-          gradle :app:assembleDebug \
-            --no-daemon \
-            --stacktrace \
-            --warning-mode all
-
-      # ==========================================
-      # 15. Find APK
-      # ==========================================
-      - name: Find APK
-        shell: bash
-        run: |
-          echo "=========================================="
-          echo "GENERATED APK"
-          echo "=========================================="
-
-          find app/build/outputs/apk \
-            -type f \
-            -name "*.apk" \
-            -print
-
-          APK_COUNT=$(find app/build/outputs/apk \
-            -type f \
-            -name "*.apk" | wc -l)
-
-          if [ "$APK_COUNT" -eq 0 ]; then
-            echo "ERROR: APK was not generated."
-            exit 1
-          fi
-
-      # ==========================================
-      # 16. Prepare APK
-      # ==========================================
-      - name: Prepare LinguaX APK
-        shell: bash
-        run: |
-          mkdir -p release
-
-          APK=$(find app/build/outputs/apk \
-            -type f \
-            -name "*.apk" \
-            | head -n 1)
-
-          cp "$APK" release/LinguaX-debug.apk
-
-          echo "Final APK:"
-          ls -lh release/LinguaX-debug.apk
-
-      # ==========================================
-      # 17. Upload APK
-      # ==========================================
-      - name: Upload LinguaX APK
+      - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: LinguaX-APK
-          path: release/LinguaX-debug.apk
-          if-no-files-found: error
-          retention-days: 30
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 14

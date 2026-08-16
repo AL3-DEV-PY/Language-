@@ -143,6 +143,7 @@ fun LinguaXApp(viewModel: MainViewModel = viewModel()) {
                         LessonScreen(
                             l10n = l10n,
                             lessonState = lessonState,
+                            targetLanguageCode = selectedTargetLanguage.code,
                             onSelectOption = { viewModel.selectLessonOption(it) },
                             onCheckAnswer = { viewModel.checkLessonAnswer() },
                             onProceed = { viewModel.proceedLessonExercise() },
@@ -153,6 +154,7 @@ fun LinguaXApp(viewModel: MainViewModel = viewModel()) {
                         FlashcardReviewScreen(
                             l10n = l10n,
                             flashcardState = flashcardState,
+                            targetLanguageCode = selectedTargetLanguage.code,
                             onFlip = { viewModel.flipFlashcard() },
                             onRate = { viewModel.recordFlashcardRating(it) },
                             onExit = { viewModel.exitFlashcards() }
@@ -234,7 +236,9 @@ fun LinguaXApp(viewModel: MainViewModel = viewModel()) {
                                             languagesResource = languagesResource,
                                             coursesResource = coursesResource,
                                             onLanguageSelected = { viewModel.setSelectedTargetLanguage(it) },
-                                            onLessonClicked = { lesson -> viewModel.openLesson(lesson) }
+                                            onLessonClicked = { lesson -> viewModel.openLesson(lesson) },
+                                            onRetryLanguages = { viewModel.loadLanguages() },
+                                            onRetryCourses = { viewModel.loadCourses(selectedTargetLanguage.code, selectedTargetLanguage.id) }
                                         )
                                     }
                                     MainTab.PRACTICE -> {

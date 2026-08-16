@@ -20,6 +20,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -28,8 +29,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.i18n.L10nStrings
 import com.example.data.model.VocabularyItem
+import com.example.ui.audio.AudioPlayerManager
+import com.example.ui.audio.rememberAudioPlayerManager
 import com.example.ui.components.LinguaX3DCard
 import com.example.ui.components.LinguaXProgressBar
 import com.example.ui.theme.*
@@ -39,11 +43,14 @@ import com.example.ui.viewmodel.FlashcardUiState
 fun FlashcardReviewScreen(
     l10n: L10nStrings,
     flashcardState: FlashcardUiState,
+    targetLanguageCode: String = "en",
     onFlip: () -> Unit,
     onRate: (known: Boolean) -> Unit,
     onExit: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val audioPlayer = rememberAudioPlayerManager()
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -61,10 +68,18 @@ fun FlashcardReviewScreen(
                         totalCount = flashcardState.items.size,
                         isFlipped = flashcardState.isFlipped,
                         isSmartReview = flashcardState.isSmartReview,
+                        targetLanguageCode = targetLanguageCode,
+                        audioPlayer = audioPlayer,
                         l10n = l10n,
                         onFlip = onFlip,
-                        onRate = onRate,
-                        onExit = onExit
+                        onRate = {
+                            audioPlayer.stop()
+                            onRate(it)
+                        },
+                        onExit = {
+                            audioPlayer.stop()
+                            onExit()
+                        }
                     )
                 }
             }
@@ -72,11 +87,14 @@ fun FlashcardReviewScreen(
                 FlashcardCompletedView(
                     completedState = flashcardState,
                     l10n = l10n,
-                    onDone = onExit
+                    onDone = {
+                        audioPlayer.stop()
+                        onExit()
+                    }
                 )
             }
             is FlashcardUiState.Idle -> {
-                // Should not happen when screen is active
+                // Inactive state
             }
         }
     }
@@ -89,18 +107,26 @@ private fun FlashcardActiveView(
     totalCount: Int,
     isFlipped: Boolean,
     isSmartReview: Boolean,
+    targetLanguageCode: String,
+    audioPlayer: AudioPlayerManager,
     l10n: L10nStrings,
     onFlip: () -> Unit,
     onRate: (known: Boolean) -> Unit,
     onExit: () -> Unit
 ) {
     val progress = (currentIndex.toFloat() / totalCount.toFloat()).coerceIn(0f, 1f)
-    var isAudioSimulated by remember { mutableStateOf(false) }
+    val isPlaying by audioPlayer.isPlaying.collectAsStateWithLifecycle()
 
     val rotation by animateFloatAsState(
         targetValue = if (isFlipped) 180f else 0f,
         animationSpec = tween(durationMillis = 350),
         label = "flashcard_flip"
+    )
+
+    val pulseScale by animateFloatAsState(
+        targetValue = if (isPlaying) 1.15f else 1f,
+        animationSpec = tween(300),
+        label = "flashcard_audio_pulse"
     )
 
     Column(
@@ -179,7 +205,7 @@ private fun FlashcardActiveView(
             ) {
                 // Determine whether to show front or back depending on rotation degree
                 if (rotation <= 90f) {
-                    // Front of Card (Word, Phonetic, Part of Speech)
+                    // Front of Card (Word, Phonetic, Part of Speech, Audio)
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
@@ -204,19 +230,50 @@ private fun FlashcardActiveView(
                                 )
                             }
 
-                            IconButton(
-                                onClick = { isAudioSimulated = !isAudioSimulated },
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .background(if (isAudioSimulated) LinguaXAccent else Color(0xFF1B2840))
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-                                    contentDescription = "Pronounce Word",
-                                    tint = if (isAudioSimulated) Color.Black else LinguaXAccent,
-                                    modifier = Modifier.size(20.dp)
-                                )
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                // Slow audio button
+                                IconButton(
+                                    onClick = {
+                                        audioPlayer.play(
+                                            text = item.word,
+                                            languageCode = targetLanguageCode,
+                                            isSlow = true,
+                                            audioUrl = item.audioUrl
+                                        )
+                                    },
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF1C2840))
+                                        .testTag("flashcard_slow_audio_btn")
+                                ) {
+                                    Text(text = "🐢", fontSize = 14.sp)
+                                }
+
+                                // Normal audio button
+                                IconButton(
+                                    onClick = {
+                                        audioPlayer.play(
+                                            text = item.word,
+                                            languageCode = targetLanguageCode,
+                                            isSlow = false,
+                                            audioUrl = item.audioUrl
+                                        )
+                                    },
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .scale(pulseScale)
+                                        .clip(CircleShape)
+                                        .background(if (isPlaying) LinguaXAccent else Color(0xFF1B2840))
+                                        .testTag("flashcard_pronounce_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                                        contentDescription = "Pronounce Word",
+                                        tint = if (isPlaying) Color.Black else LinguaXAccent,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             }
                         }
 
@@ -290,17 +347,25 @@ private fun FlashcardActiveView(
                             }
 
                             IconButton(
-                                onClick = { isAudioSimulated = !isAudioSimulated },
+                                onClick = {
+                                    audioPlayer.play(
+                                        text = item.word,
+                                        languageCode = targetLanguageCode,
+                                        isSlow = false,
+                                        audioUrl = item.audioUrl
+                                    )
+                                },
                                 modifier = Modifier
-                                    .size(40.dp)
+                                    .size(36.dp)
+                                    .scale(pulseScale)
                                     .clip(CircleShape)
-                                    .background(if (isAudioSimulated) LinguaXAccent else Color(0xFF1B2840))
+                                    .background(if (isPlaying) LinguaXAccent else Color(0xFF1B2840))
                             ) {
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.VolumeUp,
                                     contentDescription = "Pronounce Word",
-                                    tint = if (isAudioSimulated) Color.Black else LinguaXAccent,
-                                    modifier = Modifier.size(20.dp)
+                                    tint = if (isPlaying) Color.Black else LinguaXAccent,
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
