@@ -220,8 +220,43 @@ class LinguaXRepository(
         sessionManager?.clearSession()
     }
 
+    private fun parseProfileFromJson(obj: JSONObject, fallbackUserId: String): Profile {
+        val reasonsList = mutableListOf<String>()
+        val jsonReasons = obj.optJSONArray("learning_reasons")
+        if (jsonReasons != null) {
+            for (i in 0 until jsonReasons.length()) {
+                reasonsList.add(jsonReasons.getString(i))
+            }
+        }
+
+        return Profile(
+            id = obj.optString("id", fallbackUserId),
+            username = obj.optNullableString("username"),
+            displayName = obj.optString("display_name", "Learner"),
+            avatarUrl = obj.optNullableString("avatar_url"),
+            xp = obj.optInt("xp", 0),
+            coins = obj.optInt("coins", 0),
+            streak = obj.optInt("streak", 0),
+            dailyGoal = obj.optInt("daily_goal", 15),
+            nativeLanguageId = if (obj.has("native_language_id") && !obj.isNull("native_language_id")) obj.optLong("native_language_id") else null,
+            learningLanguageId = if (obj.has("learning_language_id") && !obj.isNull("learning_language_id")) obj.optLong("learning_language_id") else null,
+            currentLevel = obj.optString("current_level", "A1"),
+            targetLevel = obj.optString("target_level", "B1"),
+            ageGroup = obj.optNullableString("age_group"),
+            gender = obj.optNullableString("gender"),
+            learningReasons = reasonsList,
+            onboardingCompleted = obj.optBoolean("onboarding_completed", false),
+            onboardingStep = obj.optInt("onboarding_step", 1),
+            createdAt = obj.optNullableString("created_at"),
+            updatedAt = obj.optNullableString("updated_at")
+        )
+    }
+
     private fun createOrUpdateProfileInSupabase(profile: Profile, token: String?) {
         try {
+            val reasonsArray = JSONArray()
+            profile.learningReasons.forEach { reasonsArray.put(it) }
+
             val jsonBody = JSONObject().apply {
                 put("id", profile.id)
                 put("display_name", profile.displayName)
@@ -230,6 +265,15 @@ class LinguaXRepository(
                 put("coins", profile.coins)
                 put("streak", profile.streak)
                 put("daily_goal", profile.dailyGoal)
+                profile.nativeLanguageId?.let { put("native_language_id", it) }
+                profile.learningLanguageId?.let { put("learning_language_id", it) }
+                put("current_level", profile.currentLevel ?: "A1")
+                put("target_level", profile.targetLevel ?: "B1")
+                profile.ageGroup?.let { put("age_group", it) }
+                profile.gender?.let { put("gender", it) }
+                put("learning_reasons", reasonsArray)
+                put("onboarding_completed", profile.onboardingCompleted)
+                put("onboarding_step", profile.onboardingStep)
             }
             val reqBuilder = Request.Builder()
                 .url("${SupabaseConfig.url}/rest/v1/profiles")
@@ -258,21 +302,132 @@ class LinguaXRepository(
                 val array = JSONArray(resStr)
                 if (array.length() > 0) {
                     val obj = array.getJSONObject(0)
-                    Profile(
-                        id = obj.getString("id"),
-                        username = obj.optNullableString("username"),
-                        displayName = obj.optString("display_name", "Learner"),
-                        avatarUrl = obj.optNullableString("avatar_url"),
-                        xp = obj.optInt("xp", 0),
-                        coins = obj.optInt("coins", 0),
-                        streak = obj.optInt("streak", 0),
-                        dailyGoal = obj.optInt("daily_goal", 20),
-                        createdAt = obj.optNullableString("created_at"),
-                        updatedAt = obj.optNullableString("updated_at")
-                    )
+                    parseProfileFromJson(obj, userId)
                 } else null
             } else null
         } catch (_: Exception) { null }
+    }
+
+    suspend fun saveOnboarding(
+        nativeLanguageId: Long,
+        learningLanguageId: Long,
+        currentLevel: String,
+        targetLevel: String,
+        ageGroup: String?,
+        gender: String?,
+        learningReasons: List<String>,
+        dailyGoal: Int
+    ): Resource<Profile> = withContext(Dispatchers.IO) {
+        val session = _currentSession.value ?: return@withContext Resource.Error("User is not authenticated.")
+
+        val updatedProfile = session.profile.copy(
+            nativeLanguageId = nativeLanguageId,
+            learningLanguageId = learningLanguageId,
+            currentLevel = currentLevel,
+            targetLevel = targetLevel,
+            ageGroup = ageGroup,
+            gender = gender,
+            learningReasons = learningReasons,
+            dailyGoal = dailyGoal,
+            onboardingCompleted = true,
+            onboardingStep = 8
+        )
+
+        if (!SupabaseConfig.isConfigured) {
+            val updatedSession = session.copy(profile = updatedProfile)
+            _currentSession.value = updatedSession
+            sessionManager?.saveSession(updatedSession)
+            sessionManager?.clearOnboardingDraft()
+            return@withContext Resource.Success(updatedProfile)
+        }
+
+        try {
+            val reasonsJson = JSONArray()
+            learningReasons.forEach { reasonsJson.put(it) }
+
+            var savedProfile: Profile? = null
+
+            // 1. Try RPC call
+            try {
+                val rpcBody = JSONObject().apply {
+                    put("p_native_language_id", nativeLanguageId)
+                    put("p_learning_language_id", learningLanguageId)
+                    put("p_current_level", currentLevel)
+                    put("p_target_level", targetLevel)
+                    if (ageGroup != null) put("p_age_group", ageGroup)
+                    if (gender != null) put("p_gender", gender)
+                    put("p_learning_reasons", reasonsJson)
+                    put("p_daily_goal", dailyGoal)
+                }
+                val rpcReq = Request.Builder()
+                    .url("${SupabaseConfig.url}/rest/v1/rpc/save_user_onboarding")
+                    .header("apikey", SupabaseConfig.anonKey)
+                    .apply {
+                        session.accessToken?.let { header("Authorization", "Bearer $it") }
+                    }
+                    .post(rpcBody.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+
+                val rpcResp = httpClient.newCall(rpcReq).execute()
+                val rpcStr = rpcResp.body?.string() ?: ""
+                if (rpcResp.isSuccessful && rpcStr.isNotBlank()) {
+                    val rpcJson = JSONObject(rpcStr)
+                    val profObj = rpcJson.optJSONObject("profile")
+                    if (profObj != null) {
+                        savedProfile = parseProfileFromJson(profObj, session.userId)
+                    }
+                }
+            } catch (_: Exception) {}
+
+            // 2. Fallback to direct REST PATCH if RPC is unavailable
+            if (savedProfile == null) {
+                val patchBody = JSONObject().apply {
+                    put("native_language_id", nativeLanguageId)
+                    put("learning_language_id", learningLanguageId)
+                    put("current_level", currentLevel)
+                    put("target_level", targetLevel)
+                    if (ageGroup != null) put("age_group", ageGroup)
+                    if (gender != null) put("gender", gender)
+                    put("learning_reasons", reasonsJson)
+                    put("daily_goal", dailyGoal)
+                    put("onboarding_completed", true)
+                    put("onboarding_step", 8)
+                }
+                val patchReq = Request.Builder()
+                    .url("${SupabaseConfig.url}/rest/v1/profiles?id=eq.${session.userId}")
+                    .header("apikey", SupabaseConfig.anonKey)
+                    .header("Prefer", "return=representation")
+                    .apply {
+                        session.accessToken?.let { header("Authorization", "Bearer $it") }
+                    }
+                    .patch(patchBody.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+
+                val patchResp = httpClient.newCall(patchReq).execute()
+                val patchStr = patchResp.body?.string() ?: ""
+                if (patchResp.isSuccessful) {
+                    if (patchStr.isNotBlank()) {
+                        val arr = JSONArray(patchStr)
+                        if (arr.length() > 0) {
+                            savedProfile = parseProfileFromJson(arr.getJSONObject(0), session.userId)
+                        }
+                    }
+                    if (savedProfile == null) savedProfile = updatedProfile
+                } else {
+                    return@withContext Resource.Error("Could not save your profile. Please check your connection and try again.")
+                }
+            }
+
+            val finalProfile = savedProfile ?: updatedProfile
+            val updatedSession = session.copy(profile = finalProfile)
+            _currentSession.value = updatedSession
+            sessionManager?.saveSession(updatedSession)
+            sessionManager?.clearOnboardingDraft()
+
+            Resource.Success(finalProfile)
+        } catch (e: Exception) {
+            Resource.Error("Could not save your profile. Please check your connection and try again.", e)
+        }
     }
 
     private fun fetchAndSyncUserProgress(userId: String, token: String?) {

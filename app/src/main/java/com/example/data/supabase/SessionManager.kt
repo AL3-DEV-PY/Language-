@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.example.data.model.Profile
 import com.example.data.repository.UserSession
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -23,6 +24,7 @@ class SessionManager(context: Context) {
         private const val KEY_PROFILE_JSON = "profile_json"
         private const val KEY_COMPLETED_LESSONS = "completed_lesson_ids"
         private const val KEY_APP_LANGUAGE = "app_language"
+        private const val KEY_ONBOARDING_DRAFT = "onboarding_draft"
     }
 
     fun saveAppLanguage(languageCode: String) {
@@ -47,16 +49,40 @@ class SessionManager(context: Context) {
         return getCompletedLessonIdStrings().mapNotNull { it.toLongOrNull() }.toSet()
     }
 
+    fun saveOnboardingDraft(draftJson: String) {
+        prefs.edit().putString(KEY_ONBOARDING_DRAFT, draftJson).apply()
+    }
+
+    fun loadOnboardingDraft(): String? {
+        return prefs.getString(KEY_ONBOARDING_DRAFT, null)
+    }
+
+    fun clearOnboardingDraft() {
+        prefs.edit().remove(KEY_ONBOARDING_DRAFT).apply()
+    }
+
     fun saveSession(session: UserSession) {
+        val reasonsArray = JSONArray()
+        session.profile.learningReasons.forEach { reasonsArray.put(it) }
+
         val profileJson = JSONObject().apply {
             put("id", session.profile.id)
             put("username", session.profile.username ?: "")
-            put("display_name", session.profile.displayName)
+            put("display_name", session.profile.displayName ?: "Learner")
             put("avatar_url", session.profile.avatarUrl ?: "")
             put("xp", session.profile.xp)
             put("coins", session.profile.coins)
             put("streak", session.profile.streak)
             put("daily_goal", session.profile.dailyGoal)
+            session.profile.nativeLanguageId?.let { put("native_language_id", it) }
+            session.profile.learningLanguageId?.let { put("learning_language_id", it) }
+            put("current_level", session.profile.currentLevel ?: "A1")
+            put("target_level", session.profile.targetLevel ?: "B1")
+            put("age_group", session.profile.ageGroup ?: "")
+            put("gender", session.profile.gender ?: "")
+            put("learning_reasons", reasonsArray)
+            put("onboarding_completed", session.profile.onboardingCompleted)
+            put("onboarding_step", session.profile.onboardingStep)
         }.toString()
 
         prefs.edit()
@@ -80,6 +106,14 @@ class SessionManager(context: Context) {
         val profile = if (!profileJsonStr.isNullOrBlank()) {
             try {
                 val json = JSONObject(profileJsonStr)
+                val reasonsList = mutableListOf<String>()
+                val jsonReasons = json.optJSONArray("learning_reasons")
+                if (jsonReasons != null) {
+                    for (i in 0 until jsonReasons.length()) {
+                        reasonsList.add(jsonReasons.getString(i))
+                    }
+                }
+
                 Profile(
                     id = json.optString("id", userId),
                     username = json.optString("username").takeIf { it.isNotBlank() },
@@ -87,8 +121,17 @@ class SessionManager(context: Context) {
                     avatarUrl = json.optString("avatar_url").takeIf { it.isNotBlank() },
                     xp = json.optInt("xp", 0),
                     coins = json.optInt("coins", 0),
-                    streak = json.optInt("streak", 1),
-                    dailyGoal = json.optInt("daily_goal", 20)
+                    streak = json.optInt("streak", 0),
+                    dailyGoal = json.optInt("daily_goal", 15),
+                    nativeLanguageId = if (json.has("native_language_id")) json.optLong("native_language_id") else null,
+                    learningLanguageId = if (json.has("learning_language_id")) json.optLong("learning_language_id") else null,
+                    currentLevel = json.optString("current_level", "A1"),
+                    targetLevel = json.optString("target_level", "B1"),
+                    ageGroup = json.optString("age_group").takeIf { it.isNotBlank() },
+                    gender = json.optString("gender").takeIf { it.isNotBlank() },
+                    learningReasons = reasonsList,
+                    onboardingCompleted = json.optBoolean("onboarding_completed", false),
+                    onboardingStep = json.optInt("onboarding_step", 1)
                 )
             } catch (_: Exception) {
                 Profile(
@@ -97,8 +140,9 @@ class SessionManager(context: Context) {
                     displayName = email.substringBefore("@"),
                     xp = 0,
                     coins = 0,
-                    streak = 1,
-                    dailyGoal = 20
+                    streak = 0,
+                    dailyGoal = 15,
+                    onboardingCompleted = false
                 )
             }
         } else {
@@ -108,8 +152,9 @@ class SessionManager(context: Context) {
                 displayName = email.substringBefore("@"),
                 xp = 0,
                 coins = 0,
-                streak = 1,
-                dailyGoal = 20
+                streak = 0,
+                dailyGoal = 15,
+                onboardingCompleted = false
             )
         }
 

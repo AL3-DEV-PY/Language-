@@ -12,7 +12,16 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     xp INTEGER DEFAULT 0 CHECK (xp >= 0),
     coins INTEGER DEFAULT 0 CHECK (coins >= 0),
     streak INTEGER DEFAULT 0 CHECK (streak >= 0),
-    daily_goal INTEGER DEFAULT 20 CHECK (daily_goal > 0),
+    daily_goal INTEGER DEFAULT 15 CHECK (daily_goal > 0),
+    native_language_id BIGINT REFERENCES public.languages(id) ON DELETE SET NULL,
+    learning_language_id BIGINT REFERENCES public.languages(id) ON DELETE SET NULL,
+    current_level TEXT DEFAULT 'A1',
+    target_level TEXT DEFAULT 'B1',
+    age_group TEXT,
+    gender TEXT,
+    learning_reasons JSONB DEFAULT '[]'::jsonb,
+    onboarding_completed BOOLEAN DEFAULT FALSE,
+    onboarding_step INTEGER DEFAULT 1,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -208,6 +217,83 @@ $$;
 
 -- Grant execution permission to authenticated users
 GRANT EXECUTE ON FUNCTION public.complete_lesson(BIGINT) TO authenticated;
+
+-- ==============================================================================
+-- 11.B RPC FUNCTION: save_user_onboarding (Transaction-Safe & Idempotent)
+-- ==============================================================================
+CREATE OR REPLACE FUNCTION public.save_user_onboarding(
+    p_native_language_id BIGINT,
+    p_learning_language_id BIGINT,
+    p_current_level TEXT,
+    p_target_level TEXT,
+    p_age_group TEXT,
+    p_gender TEXT,
+    p_learning_reasons JSONB,
+    p_daily_goal INT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_user_id UUID;
+    v_profile RECORD;
+BEGIN
+    v_user_id := auth.uid();
+    IF v_user_id IS NULL THEN
+        RAISE EXCEPTION 'Not authenticated';
+    END IF;
+
+    INSERT INTO public.profiles (
+        id,
+        native_language_id,
+        learning_language_id,
+        current_level,
+        target_level,
+        age_group,
+        gender,
+        learning_reasons,
+        daily_goal,
+        onboarding_completed,
+        onboarding_step,
+        updated_at
+    )
+    VALUES (
+        v_user_id,
+        p_native_language_id,
+        p_learning_language_id,
+        COALESCE(p_current_level, 'A1'),
+        COALESCE(p_target_level, 'B1'),
+        p_age_group,
+        p_gender,
+        COALESCE(p_learning_reasons, '[]'::jsonb),
+        COALESCE(p_daily_goal, 15),
+        TRUE,
+        8,
+        NOW()
+    )
+    ON CONFLICT (id) DO UPDATE SET
+        native_language_id = EXCLUDED.native_language_id,
+        learning_language_id = EXCLUDED.learning_language_id,
+        current_level = EXCLUDED.current_level,
+        target_level = EXCLUDED.target_level,
+        age_group = EXCLUDED.age_group,
+        gender = EXCLUDED.gender,
+        learning_reasons = EXCLUDED.learning_reasons,
+        daily_goal = EXCLUDED.daily_goal,
+        onboarding_completed = TRUE,
+        onboarding_step = 8,
+        updated_at = NOW()
+    RETURNING * INTO v_profile;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'profile', to_jsonb(v_profile)
+    );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.save_user_onboarding(BIGINT, BIGINT, TEXT, TEXT, TEXT, TEXT, JSONB, INT) TO authenticated;
 
 -- ==============================================================================
 -- 12. ROW LEVEL SECURITY (RLS) POLICIES

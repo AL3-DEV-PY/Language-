@@ -16,6 +16,7 @@ import com.example.data.supabase.SessionManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 sealed class AuthState {
@@ -24,6 +25,21 @@ sealed class AuthState {
     data class Authenticated(val session: UserSession) : AuthState()
     data class Error(val message: String) : AuthState()
 }
+
+data class OnboardingState(
+    val currentStep: Int = 1,
+    val totalSteps: Int = 8,
+    val nativeLanguage: LanguageItem? = null,
+    val learningLanguage: LanguageItem? = null,
+    val currentLevel: String = "A1",
+    val targetLevel: String = "B1",
+    val ageGroup: String? = null,
+    val gender: String? = null,
+    val selectedReasons: Set<String> = emptySet(),
+    val dailyGoalMinutes: Int = 15,
+    val isSaving: Boolean = false,
+    val errorMessage: String? = null
+)
 
 sealed class LessonUiState {
     object Idle : LessonUiState()
@@ -118,6 +134,10 @@ class MainViewModel @JvmOverloads constructor(
     // Leaderboard State
     private val _leaderboardState = MutableStateFlow<Resource<List<LeaderboardEntry>>>(Resource.Loading)
     val leaderboardState: StateFlow<Resource<List<LeaderboardEntry>>> = _leaderboardState.asStateFlow()
+
+    // Dedicated Onboarding State
+    private val _onboardingState = MutableStateFlow(OnboardingState())
+    val onboardingState: StateFlow<OnboardingState> = _onboardingState.asStateFlow()
 
     // Dedicated Full-Screen Lesson State Machine
     private val _lessonState = MutableStateFlow<LessonUiState>(LessonUiState.Idle)
@@ -490,6 +510,108 @@ class MainViewModel @JvmOverloads constructor(
                 _authState.value = AuthState.Authenticated(
                     currentSession.copy(profile = res.data)
                 )
+            }
+        }
+    }
+
+    // ==========================================
+    // ONBOARDING STEP CONTROLLER & ACTIONS
+    // ==========================================
+
+    fun selectOnboardingNativeLanguage(language: LanguageItem) {
+        _onboardingState.update { it.copy(nativeLanguage = language, errorMessage = null) }
+    }
+
+    fun selectOnboardingLearningLanguage(language: LanguageItem) {
+        _onboardingState.update { it.copy(learningLanguage = language, errorMessage = null) }
+    }
+
+    fun selectOnboardingCurrentLevel(level: String) {
+        _onboardingState.update { it.copy(currentLevel = level, errorMessage = null) }
+    }
+
+    fun selectOnboardingTargetLevel(level: String) {
+        _onboardingState.update { it.copy(targetLevel = level, errorMessage = null) }
+    }
+
+    fun selectOnboardingAgeGroup(ageGroup: String) {
+        _onboardingState.update { it.copy(ageGroup = ageGroup, errorMessage = null) }
+    }
+
+    fun selectOnboardingGender(gender: String) {
+        _onboardingState.update { it.copy(gender = gender, errorMessage = null) }
+    }
+
+    fun toggleOnboardingReason(reasonKey: String) {
+        _onboardingState.update { state ->
+            val updated = state.selectedReasons.toMutableSet()
+            if (updated.contains(reasonKey)) {
+                updated.remove(reasonKey)
+            } else {
+                updated.add(reasonKey)
+            }
+            state.copy(selectedReasons = updated, errorMessage = null)
+        }
+    }
+
+    fun selectOnboardingDailyGoal(minutes: Int) {
+        _onboardingState.update { it.copy(dailyGoalMinutes = minutes, errorMessage = null) }
+    }
+
+    fun nextOnboardingStep(): Boolean {
+        val current = _onboardingState.value
+        if (current.currentStep < current.totalSteps) {
+            _onboardingState.update { it.copy(currentStep = it.currentStep + 1, errorMessage = null) }
+            return true
+        }
+        return false
+    }
+
+    fun prevOnboardingStep(): Boolean {
+        val current = _onboardingState.value
+        if (current.currentStep > 1) {
+            _onboardingState.update { it.copy(currentStep = it.currentStep - 1, errorMessage = null) }
+            return true
+        }
+        return false
+    }
+
+    fun submitOnboarding(onSuccess: () -> Unit = {}) {
+        val current = _onboardingState.value
+        val nativeLang = current.nativeLanguage
+        val learningLang = current.learningLanguage
+
+        if (nativeLang == null || learningLang == null) {
+            _onboardingState.update { it.copy(errorMessage = "Please choose your native and target languages.") }
+            return
+        }
+
+        viewModelScope.launch {
+            _onboardingState.update { it.copy(isSaving = true, errorMessage = null) }
+
+            when (val res = repository.saveOnboarding(
+                nativeLanguageId = nativeLang.id,
+                learningLanguageId = learningLang.id,
+                currentLevel = current.currentLevel,
+                targetLevel = current.targetLevel,
+                ageGroup = current.ageGroup,
+                gender = current.gender,
+                learningReasons = current.selectedReasons.toList(),
+                dailyGoal = current.dailyGoalMinutes
+            )) {
+                is Resource.Success -> {
+                    _onboardingState.update { it.copy(isSaving = false) }
+                    // Update app selected target language to the new learning language
+                    setSelectedTargetLanguage(learningLang)
+                    loadCourses(learningLang.code, learningLang.id)
+                    onSuccess()
+                }
+                is Resource.Error -> {
+                    _onboardingState.update { it.copy(isSaving = false, errorMessage = res.message) }
+                }
+                else -> {
+                    _onboardingState.update { it.copy(isSaving = false) }
+                }
             }
         }
     }

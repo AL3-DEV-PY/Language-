@@ -12,7 +12,16 @@ data class Profile(
     @Json(name = "xp") val xp: Int = 0,
     @Json(name = "coins") val coins: Int = 0,
     @Json(name = "streak") val streak: Int = 0,
-    @Json(name = "daily_goal") val dailyGoal: Int = 20,
+    @Json(name = "daily_goal") val dailyGoal: Int = 15,
+    @Json(name = "native_language_id") val nativeLanguageId: Long? = null,
+    @Json(name = "learning_language_id") val learningLanguageId: Long? = null,
+    @Json(name = "current_level") val currentLevel: String? = "A1",
+    @Json(name = "target_level") val targetLevel: String? = "B1",
+    @Json(name = "age_group") val ageGroup: String? = null,
+    @Json(name = "gender") val gender: String? = null,
+    @Json(name = "learning_reasons") val learningReasons: List<String> = emptyList(),
+    @Json(name = "onboarding_completed") val onboardingCompleted: Boolean = false,
+    @Json(name = "onboarding_step") val onboardingStep: Int = 1,
     @Json(name = "created_at") val createdAt: String? = null,
     @Json(name = "updated_at") val updatedAt: String? = null
 )

@@ -27,6 +27,7 @@ import com.example.data.i18n.L10nStrings
 import com.example.ui.screens.achievements.AchievementsScreen
 import com.example.ui.screens.auth.LandingScreen
 import com.example.ui.screens.auth.LoginScreen
+import com.example.ui.screens.auth.OnboardingScreen
 import com.example.ui.screens.auth.SignupScreen
 import com.example.ui.screens.challenges.ChallengesScreen
 import com.example.ui.screens.courses.CoursesScreen
@@ -139,7 +140,25 @@ fun LinguaXApp(viewModel: MainViewModel = viewModel()) {
                 is AuthState.Authenticated -> {
                     val profile = state.session.profile
 
-                    if (lessonState !is LessonUiState.Idle) {
+                    if (!profile.onboardingCompleted) {
+                        val onboardingState by viewModel.onboardingState.collectAsStateWithLifecycle()
+                        OnboardingScreen(
+                            l10n = l10n,
+                            onboardingState = onboardingState,
+                            languagesResource = languagesResource,
+                            onSelectNativeLanguage = { viewModel.selectOnboardingNativeLanguage(it) },
+                            onSelectLearningLanguage = { viewModel.selectOnboardingLearningLanguage(it) },
+                            onSelectCurrentLevel = { viewModel.selectOnboardingCurrentLevel(it) },
+                            onSelectTargetLevel = { viewModel.selectOnboardingTargetLevel(it) },
+                            onSelectAgeGroup = { viewModel.selectOnboardingAgeGroup(it) },
+                            onSelectGender = { viewModel.selectOnboardingGender(it) },
+                            onToggleReason = { viewModel.toggleOnboardingReason(it) },
+                            onSelectDailyGoal = { viewModel.selectOnboardingDailyGoal(it) },
+                            onNextStep = { viewModel.nextOnboardingStep() },
+                            onPrevStep = { viewModel.prevOnboardingStep() },
+                            onSubmit = { viewModel.submitOnboarding() }
+                        )
+                    } else if (lessonState !is LessonUiState.Idle) {
                         LessonScreen(
                             l10n = l10n,
                             lessonState = lessonState,

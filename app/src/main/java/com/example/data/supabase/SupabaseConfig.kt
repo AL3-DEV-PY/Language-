@@ -1,8 +1,11 @@
 package com.example.data.supabase
 
+import android.util.Log
 import com.example.BuildConfig
 
 object SupabaseConfig {
+    private const val TAG = "SupabaseConfig"
+
     private fun clean(value: String): String {
         return value.trim().removeSurrounding("\"").removeSurrounding("'").trim()
     }
@@ -31,10 +34,17 @@ object SupabaseConfig {
         }
 
     val isConfigured: Boolean
-        get() = url.isNotBlank() &&
-                url.startsWith("https://") &&
-                !url.contains("your-project") &&
-                anonKey.isNotBlank() &&
-                anonKey != "your-supabase-anon-key" &&
-                !anonKey.contains("your-supabase")
+        get() {
+            val valid = url.isNotBlank() &&
+                    url.startsWith("https://") &&
+                    !url.contains("your-project") &&
+                    anonKey.isNotBlank() &&
+                    anonKey != "your-supabase-anon-key" &&
+                    !anonKey.contains("your-supabase")
+
+            if (!valid) {
+                Log.w(TAG, "Supabase credentials are not fully configured or are placeholder defaults.")
+            }
+            return valid
+        }
 }
